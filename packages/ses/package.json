@@ -1,0 +1,12 @@
+{
+  "name": "@email-ops/ses",
+  "version": "0.1.0",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.968.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

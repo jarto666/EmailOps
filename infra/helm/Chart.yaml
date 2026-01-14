@@ -1,0 +1,6 @@
+apiVersion: v2
+name: email-ops
+description: A Helm chart for EmailOps
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

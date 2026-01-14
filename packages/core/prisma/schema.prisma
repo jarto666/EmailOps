@@ -1,0 +1,260 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Workspace {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  connectors     Connector[]
+  senderProfiles SenderProfile[]
+  templates      Template[]
+  segments       Segment[]
+  campaigns      Campaign[]
+  suppressions   Suppression[]
+  preferences    Preference[]
+}
+
+enum ConnectorType {
+  POSTGRES
+  BIGQUERY
+  SES
+  RESEND
+  SMTP
+}
+
+model Connector {
+  id          String        @id @default(uuid())
+  workspaceId String
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
+  type        ConnectorType
+  name        String
+  config      Json          // Encrypted credentials or config
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  senderProfiles SenderProfile[]
+  segments       Segment[]
+}
+
+model SenderProfile {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  connectorId String
+  connector   Connector @relation(fields: [connectorId], references: [id])
+  fromEmail   String
+  fromName    String?
+  replyTo     String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  campaigns Campaign[]
+}
+
+enum TemplateCategory {
+  MARKETING
+  TRANSACTIONAL
+  BOTH
+}
+
+model Template {
+  id          String           @id @default(uuid())
+  workspaceId String
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id])
+  key         String           @unique // e.g. "welcome-email"
+  name        String
+  category    TemplateCategory
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  versions  TemplateVersion[]
+  campaigns Campaign[]
+}
+
+enum AuthoringMode {
+  RAW_HTML
+  RAW_MJML
+  UI_BUILDER
+}
+
+model TemplateVersion {
+  id            String        @id @default(uuid())
+  templateId    String
+  template      Template      @relation(fields: [templateId], references: [id])
+  name          String        // e.g. "v1.0"
+  subject       String
+  bodyHtml      String?       // Final compiled HTML
+  bodyMjml      String?       // Source MJML if applicable
+  builderSchema Json?         // Source JSON if Builder
+  mode          AuthoringMode
+  active        Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+
+  // We might want to link campaigns to specific versions in the future
+  // For now, Campaign points to Template and uses active version
+}
+
+model Segment {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  name        String
+  sqlQuery    String
+  connectorId String
+  connector   Connector @relation(fields: [connectorId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  campaigns Campaign[]
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+  COMPLETED
+}
+
+enum ScheduleType {
+  MANUAL
+  CRON
+}
+
+model Campaign {
+  id              String          @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id])
+  name            String
+  description     String?
+  status          CampaignStatus  @default(DRAFT)
+  templateId      String
+  template        Template        @relation(fields: [templateId], references: [id])
+  segmentId       String
+  segment         Segment         @relation(fields: [segmentId], references: [id])
+  senderProfileId String
+  senderProfile   SenderProfile   @relation(fields: [senderProfileId], references: [id])
+  scheduleType    ScheduleType    @default(MANUAL)
+  cronExpression  String?
+  policies        Json?           // Freq caps, etc.
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  runs CampaignRun[]
+}
+
+enum RunStatus {
+  CREATED
+  AUDIENCE_BUILDING
+  AUDIENCE_READY
+  SENDING
+  COMPLETED
+  FAILED
+}
+
+model CampaignRun {
+  id          String    @id @default(uuid())
+  campaignId  String
+  campaign    Campaign  @relation(fields: [campaignId], references: [id])
+  status      RunStatus @default(CREATED)
+  stats       Json?     // { total: 100, sent: 90, failed: 10 }
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  recipients RunRecipient[]
+}
+
+enum RecipientStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model RunRecipient {
+  id          String          @id @default(uuid())
+  runId       String
+  run         CampaignRun     @relation(fields: [runId], references: [id])
+  recipientId String          // From Segment
+  email       String
+  vars        Json?
+  status      RecipientStatus @default(PENDING)
+  skipReason  String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  sends Send[]
+
+  @@unique([runId, recipientId]) // Idempotency within run
+}
+
+enum SendStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  BOUNCED
+  COMPLAINT
+  FAILED
+}
+
+model Send {
+  id                String       @id @default(uuid())
+  runRecipientId    String?
+  runRecipient      RunRecipient? @relation(fields: [runRecipientId], references: [id])
+  workspaceId       String // Denormalized for quick access? Or rely on join?
+  // Ideally link to transactional requests too if we store them
+  
+  idempotencyKey    String       @unique
+  status            SendStatus   @default(QUEUED)
+  providerMessageId String?
+  attempts          Int          @default(0)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+}
+
+enum SuppressionReason {
+  BOUNCE
+  COMPLAINT
+  UNSUBSCRIBE
+  MANUAL
+}
+
+model Suppression {
+  id          String            @id @default(uuid())
+  workspaceId String
+  workspace   Workspace         @relation(fields: [workspaceId], references: [id])
+  email       String
+  reason      SuppressionReason
+  createdAt   DateTime          @default(now())
+
+  @@unique([workspaceId, email])
+}
+
+model Preference {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  email       String
+  category    String    // e.g. "marketing", "updates"
+  optedIn     Boolean   @default(true)
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([workspaceId, email, category])
+}
+
+model DeadLetter {
+  id        String   @id @default(uuid())
+  jobId     String?
+  queueName String
+  payload   Json
+  error     String?
+  createdAt DateTime @default(now())
+}

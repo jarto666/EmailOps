@@ -1,0 +1,14 @@
+{
+  "name": "@email-ops/email",
+  "version": "0.1.0",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "dependencies": {
+    "handlebars": "^4.7.8",
+    "mjml": "^4.18.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "@types/mjml": "^4.7.4"
+  }
+}
