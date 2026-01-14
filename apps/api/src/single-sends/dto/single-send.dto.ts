@@ -1,7 +1,7 @@
-import { CampaignStatus, ScheduleType } from "@email-ops/core";
+import { ScheduleType, SingleSendStatus } from "@email-ops/core";
 import { IsEnum, IsNotEmpty, IsObject, IsOptional, IsString } from "class-validator";
 
-export class CreateCampaignDto {
+export class CreateSingleSendDto {
   @IsString()
   @IsNotEmpty()
   workspaceId!: string;
@@ -14,9 +14,9 @@ export class CreateCampaignDto {
   @IsOptional()
   description?: string;
 
-  @IsEnum(CampaignStatus)
+  @IsEnum(SingleSendStatus)
   @IsOptional()
-  status?: CampaignStatus;
+  status?: SingleSendStatus;
 
   @IsString()
   @IsNotEmpty()
@@ -43,7 +43,7 @@ export class CreateCampaignDto {
   policies?: Record<string, any>;
 }
 
-export class UpdateCampaignDto {
+export class UpdateSingleSendDto {
   @IsString()
   @IsOptional()
   name?: string;
@@ -52,9 +52,9 @@ export class UpdateCampaignDto {
   @IsOptional()
   description?: string;
 
-  @IsEnum(CampaignStatus)
+  @IsEnum(SingleSendStatus)
   @IsOptional()
-  status?: CampaignStatus;
+  status?: SingleSendStatus;
 
   @IsString()
   @IsOptional()
@@ -81,7 +81,7 @@ export class UpdateCampaignDto {
   policies?: Record<string, any>;
 }
 
-export class TriggerCampaignDto {
-  // reserved for future: manual overrides, dry-run, etc.
+export class TriggerSingleSendDto {
+  // reserved for future
 }
 

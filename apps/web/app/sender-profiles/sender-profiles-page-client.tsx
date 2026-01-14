@@ -4,11 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "../lib/api";
 
-type Connector = { id: string; name: string; type: string };
+type EmailConnector = { id: string; name: string; type: string };
 
 type SenderProfile = {
   id: string;
-  connectorId: string;
+  emailProviderConnectorId: string;
   fromEmail: string;
   fromName?: string | null;
   replyTo?: string | null;
@@ -20,11 +20,11 @@ export default function SenderProfilesPageClient({
   workspaceId: string;
 }) {
   const [items, setItems] = useState<SenderProfile[]>([]);
-  const [connectors, setConnectors] = useState<Connector[]>([]);
+  const [connectors, setConnectors] = useState<EmailConnector[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [connectorId, setConnectorId] = useState("");
+  const [emailProviderConnectorId, setEmailProviderConnectorId] = useState("");
   const [fromEmail, setFromEmail] = useState("");
   const [fromName, setFromName] = useState("");
   const [replyTo, setReplyTo] = useState("");
@@ -40,11 +40,12 @@ export default function SenderProfilesPageClient({
     try {
       const [profilesData, connectorsData] = await Promise.all([
         apiFetch<SenderProfile[]>("/sender-profiles", { query: { workspaceId } }),
-        apiFetch<Connector[]>("/connectors", { query: { workspaceId } }),
+        apiFetch<EmailConnector[]>("/email-connectors", { query: { workspaceId } }),
       ]);
       setItems(profilesData);
       setConnectors(connectorsData);
-      if (!connectorId && connectorsData[0]?.id) setConnectorId(connectorsData[0].id);
+      if (!emailProviderConnectorId && connectorsData[0]?.id)
+        setEmailProviderConnectorId(connectorsData[0].id);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -64,7 +65,7 @@ export default function SenderProfilesPageClient({
         method: "POST",
         body: JSON.stringify({
           workspaceId,
-          connectorId,
+          emailProviderConnectorId,
           fromEmail,
           fromName: fromName || undefined,
           replyTo: replyTo || undefined,
@@ -118,8 +119,8 @@ export default function SenderProfilesPageClient({
             {connectors.length > 0 ? (
               <select
                 className="w-full border rounded px-3 py-2"
-                value={connectorId}
-                onChange={(e) => setConnectorId(e.target.value)}
+                value={emailProviderConnectorId}
+                onChange={(e) => setEmailProviderConnectorId(e.target.value)}
               >
                 {connectors.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -130,9 +131,9 @@ export default function SenderProfilesPageClient({
             ) : (
               <input
                 className="w-full border rounded px-3 py-2 font-mono text-xs"
-                value={connectorId}
-                onChange={(e) => setConnectorId(e.target.value)}
-                placeholder="connectorId (create a connector first)"
+                value={emailProviderConnectorId}
+                onChange={(e) => setEmailProviderConnectorId(e.target.value)}
+                placeholder="emailProviderConnectorId (create an email connector first)"
               />
             )}
           </label>
@@ -169,7 +170,7 @@ export default function SenderProfilesPageClient({
           <button
             className="px-4 py-2 rounded bg-indigo-600 text-white text-sm disabled:opacity-50"
             onClick={createProfile}
-            disabled={!connectorId || !fromEmail}
+            disabled={!emailProviderConnectorId || !fromEmail}
           >
             Create
           </button>
@@ -182,9 +183,9 @@ export default function SenderProfilesPageClient({
           </button>
           <Link
             className="px-4 py-2 rounded border text-sm"
-            href={`/connectors?workspaceId=${encodeURIComponent(workspaceId)}`}
+            href={`/email-connectors?workspaceId=${encodeURIComponent(workspaceId)}`}
           >
-            Manage connectors
+            Manage email connectors
           </Link>
         </div>
 
@@ -218,7 +219,8 @@ export default function SenderProfilesPageClient({
                 </div>
                 <div className="text-xs text-gray-600">
                   {sp.fromName ? `${sp.fromName} · ` : ""}
-                  Connector: <span className="font-mono">{sp.connectorId}</span>
+                  Email connector:{" "}
+                  <span className="font-mono">{sp.emailProviderConnectorId}</span>
                 </div>
               </div>
               <div className="text-xs text-gray-500 font-mono">{sp.id}</div>

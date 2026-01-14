@@ -3,7 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { ConnectorType } from "@email-ops/core";
+import { ConnectorFactory } from "@email-ops/connectors";
+import { DataConnectorType } from "@email-ops/core";
 import { PrismaService } from "../prisma/prisma.service";
 import { EncryptionService } from "../common/encryption.service";
 
@@ -35,11 +36,11 @@ export class ConnectorsService {
 
   async create(input: {
     workspaceId: string;
-    type: ConnectorType;
+    type: DataConnectorType;
     name: string;
     config: Record<string, any>;
   }) {
-    const created = await this.prisma.connector.create({
+    const created = await this.prisma.dataConnector.create({
       data: {
         workspaceId: input.workspaceId,
         type: input.type,
@@ -51,7 +52,7 @@ export class ConnectorsService {
   }
 
   async list(workspaceId: string) {
-    const connectors = await this.prisma.connector.findMany({
+    const connectors = await this.prisma.dataConnector.findMany({
       where: { workspaceId },
       orderBy: { createdAt: "desc" },
     });
@@ -59,7 +60,7 @@ export class ConnectorsService {
   }
 
   async get(workspaceId: string, id: string) {
-    const connector = await this.prisma.connector.findFirst({
+    const connector = await this.prisma.dataConnector.findFirst({
       where: { id, workspaceId },
     });
     if (!connector) throw new NotFoundException("Connector not found");
@@ -67,12 +68,12 @@ export class ConnectorsService {
   }
 
   async update(workspaceId: string, id: string, input: any) {
-    const existing = await this.prisma.connector.findFirst({
+    const existing = await this.prisma.dataConnector.findFirst({
       where: { id, workspaceId },
     });
     if (!existing) throw new NotFoundException("Connector not found");
 
-    const updated = await this.prisma.connector.update({
+    const updated = await this.prisma.dataConnector.update({
       where: { id },
       data: {
         name: input.name ?? undefined,
@@ -84,92 +85,31 @@ export class ConnectorsService {
   }
 
   async remove(workspaceId: string, id: string) {
-    const existing = await this.prisma.connector.findFirst({
+    const existing = await this.prisma.dataConnector.findFirst({
       where: { id, workspaceId },
       select: { id: true },
     });
     if (!existing) throw new NotFoundException("Connector not found");
-    await this.prisma.connector.delete({ where: { id } });
+    await this.prisma.dataConnector.delete({ where: { id } });
     return { ok: true };
   }
 
-  async testConnection(type: ConnectorType, config: Record<string, any>) {
+  async testConnection(type: DataConnectorType, config: Record<string, any>) {
     switch (type) {
-      case ConnectorType.POSTGRES: {
-        const connectionString = this.normalizePostgresConnectionString(config);
-        // Use dynamic require so TS compilation doesn't depend on `pg` types being installed in this package.
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { Pool } = require("pg") as any;
-        const pool = new Pool({ connectionString });
-        const client = await pool.connect();
+      case DataConnectorType.POSTGRES:
+      case DataConnectorType.BIGQUERY: {
+        const adapter = ConnectorFactory.getConnector(type as any, config);
         try {
-          await client.query("BEGIN READ ONLY");
-          await client.query("SELECT 1 as ok");
-          await client.query("COMMIT");
-        } catch (e) {
-          try {
-            await client.query("ROLLBACK");
-          } catch {
-            // ignore
-          }
-          throw e;
+          await adapter.testConnection();
+          return { ok: true };
         } finally {
-          client.release();
-          await pool.end();
+          await adapter.close().catch(() => undefined);
         }
-        return { ok: true };
-      }
-      case ConnectorType.SES: {
-        const ses = this.normalizeSesConfig(config);
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { SESv2Client, GetAccountCommand } =
-          require("@aws-sdk/client-sesv2") as any;
-        const client = new SESv2Client({
-          region: ses.region,
-          credentials: {
-            accessKeyId: ses.accessKeyId,
-            secretAccessKey: ses.secretAccessKey,
-          },
-        });
-        await client.send(new GetAccountCommand({}));
-        return { ok: true };
       }
       default:
         throw new BadRequestException(
           `testConnection not implemented for connector type: ${type}`
         );
     }
-  }
-
-  private normalizePostgresConnectionString(raw: Record<string, any>): string {
-    const connectionString = raw?.connectionString;
-    if (typeof connectionString === "string" && connectionString.length > 0) {
-      return connectionString;
-    }
-    throw new BadRequestException(
-      "POSTGRES config must include a non-empty `connectionString`."
-    );
-  }
-
-  private normalizeSesConfig(raw: Record<string, any>): {
-    region: string;
-    accessKeyId: string;
-    secretAccessKey: string;
-  } {
-    const region = raw?.region;
-    const accessKeyId = raw?.accessKeyId;
-    const secretAccessKey = raw?.secretAccessKey;
-    if (typeof region !== "string" || region.length === 0) {
-      throw new BadRequestException("SES config must include `region`.");
-    }
-    if (typeof accessKeyId !== "string" || accessKeyId.length === 0) {
-      throw new BadRequestException("SES config must include `accessKeyId`.");
-    }
-    if (typeof secretAccessKey !== "string" || secretAccessKey.length === 0) {
-      throw new BadRequestException(
-        "SES config must include `secretAccessKey`."
-      );
-    }
-    return { region, accessKeyId, secretAccessKey };
   }
 }

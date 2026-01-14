@@ -1,19 +1,19 @@
-import { ConnectorType } from '@email-ops/core';
+import { DataConnectorType } from "@email-ops/core";
 import {
   IsEnum,
   IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
-} from 'class-validator';
+} from "class-validator";
 
 export class CreateConnectorDto {
   @IsString()
   @IsNotEmpty()
   workspaceId!: string;
 
-  @IsEnum(ConnectorType)
-  type!: ConnectorType;
+  @IsEnum(DataConnectorType)
+  type!: DataConnectorType;
 
   @IsString()
   @IsNotEmpty()
@@ -29,9 +29,9 @@ export class UpdateConnectorDto {
   @IsOptional()
   name?: string;
 
-  @IsEnum(ConnectorType)
+  @IsEnum(DataConnectorType)
   @IsOptional()
-  type?: ConnectorType;
+  type?: DataConnectorType;
 
   @IsObject()
   @IsOptional()
@@ -39,10 +39,9 @@ export class UpdateConnectorDto {
 }
 
 export class TestConnectionDto {
-  @IsEnum(ConnectorType)
-  type!: ConnectorType;
+  @IsEnum(DataConnectorType)
+  type!: DataConnectorType;
 
   @IsObject()
   config!: Record<string, any>;
 }
-

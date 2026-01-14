@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { ConnectorType } from "@email-ops/core";
+import { DataConnectorType } from "@email-ops/core";
 import { PrismaService } from "../prisma/prisma.service";
 import { EncryptionService } from "../common/encryption.service";
 
@@ -89,7 +89,7 @@ export class SegmentsService {
   async create(input: {
     workspaceId: string;
     name: string;
-    connectorId: string;
+    dataConnectorId: string;
     sqlQuery: string;
   }) {
     if (!input.workspaceId || input.workspaceId.trim().length === 0) {
@@ -98,8 +98,8 @@ export class SegmentsService {
     if (!input.name || input.name.trim().length === 0) {
       throw new BadRequestException("name is required.");
     }
-    if (!input.connectorId || input.connectorId.trim().length === 0) {
-      throw new BadRequestException("connectorId is required.");
+    if (!input.dataConnectorId || input.dataConnectorId.trim().length === 0) {
+      throw new BadRequestException("dataConnectorId is required.");
     }
     const sqlQuery = validateSegmentSql(input.sqlQuery);
 
@@ -110,13 +110,13 @@ export class SegmentsService {
       create: { id: input.workspaceId, name: "Default Workspace" },
     });
 
-    const connector = await this.prisma.connector.findFirst({
-      where: { id: input.connectorId, workspaceId: input.workspaceId },
+    const connector = await this.prisma.dataConnector.findFirst({
+      where: { id: input.dataConnectorId, workspaceId: input.workspaceId },
       select: { id: true },
     });
     if (!connector) {
       throw new BadRequestException(
-        "Invalid connectorId (must exist and belong to workspace)."
+        "Invalid dataConnectorId (must exist and belong to workspace)."
       );
     }
 
@@ -124,10 +124,12 @@ export class SegmentsService {
       data: {
         workspaceId: input.workspaceId,
         name: input.name,
-        connectorId: input.connectorId,
+        dataConnectorId: input.dataConnectorId,
         sqlQuery,
       },
-      include: { connector: { select: { id: true, name: true, type: true } } },
+      include: {
+        dataConnector: { select: { id: true, name: true, type: true } },
+      },
     });
   }
 
@@ -135,14 +137,18 @@ export class SegmentsService {
     return this.prisma.segment.findMany({
       where: { workspaceId },
       orderBy: { createdAt: "desc" },
-      include: { connector: { select: { id: true, name: true, type: true } } },
+      include: {
+        dataConnector: { select: { id: true, name: true, type: true } },
+      },
     });
   }
 
   async get(workspaceId: string, id: string) {
     const segment = await this.prisma.segment.findFirst({
       where: { id, workspaceId },
-      include: { connector: { select: { id: true, name: true, type: true } } },
+      include: {
+        dataConnector: { select: { id: true, name: true, type: true } },
+      },
     });
     if (!segment) throw new NotFoundException("Segment not found");
     return segment;
@@ -151,7 +157,7 @@ export class SegmentsService {
   async update(
     workspaceId: string,
     id: string,
-    input: { name?: string; connectorId?: string; sqlQuery?: string }
+    input: { name?: string; dataConnectorId?: string; sqlQuery?: string }
   ) {
     const existing = await this.prisma.segment.findFirst({
       where: { id, workspaceId },
@@ -159,21 +165,26 @@ export class SegmentsService {
     });
     if (!existing) throw new NotFoundException("Segment not found");
 
-    let connectorId: string | undefined = undefined;
-    if (input.connectorId != null) {
-      if (typeof input.connectorId !== "string" || input.connectorId.trim() === "") {
-        throw new BadRequestException("connectorId must be a non-empty string.");
+    let dataConnectorId: string | undefined = undefined;
+    if (input.dataConnectorId != null) {
+      if (
+        typeof input.dataConnectorId !== "string" ||
+        input.dataConnectorId.trim() === ""
+      ) {
+        throw new BadRequestException(
+          "dataConnectorId must be a non-empty string."
+        );
       }
-      const connector = await this.prisma.connector.findFirst({
-        where: { id: input.connectorId, workspaceId },
+      const connector = await this.prisma.dataConnector.findFirst({
+        where: { id: input.dataConnectorId, workspaceId },
         select: { id: true },
       });
       if (!connector) {
         throw new BadRequestException(
-          "Invalid connectorId (must exist and belong to workspace)."
+          "Invalid dataConnectorId (must exist and belong to workspace)."
         );
       }
-      connectorId = input.connectorId;
+      dataConnectorId = input.dataConnectorId;
     }
 
     const sqlQuery =
@@ -183,10 +194,12 @@ export class SegmentsService {
       where: { id },
       data: {
         name: input.name ?? undefined,
-        connectorId,
+        dataConnectorId,
         sqlQuery,
       },
-      include: { connector: { select: { id: true, name: true, type: true } } },
+      include: {
+        dataConnector: { select: { id: true, name: true, type: true } },
+      },
     });
   }
 
@@ -214,19 +227,19 @@ export class SegmentsService {
   ): Promise<{ count: number; rows: any[] }> {
     const segment = await this.prisma.segment.findFirst({
       where: { id, workspaceId },
-      include: { connector: true },
+      include: { dataConnector: true },
     });
     if (!segment) throw new NotFoundException("Segment not found");
 
     const sql = validateSegmentSql(segment.sqlQuery);
     const limit = clampInt(input?.limit ?? 25, 1, 100);
 
-    const connector = segment.connector;
-    if (!connector) throw new BadRequestException("Segment has no connector.");
+    const connector = segment.dataConnector;
+    if (!connector) throw new BadRequestException("Segment has no data connector.");
 
-    if (connector.type !== ConnectorType.POSTGRES) {
+    if (connector.type !== DataConnectorType.POSTGRES) {
       throw new BadRequestException(
-        `dryRun currently supports POSTGRES connectors only (got ${connector.type}).`
+        `dryRun currently supports POSTGRES data connectors only (got ${connector.type}).`
       );
     }
 

@@ -2,7 +2,7 @@ import { InjectQueue, Processor, WorkerHost } from "@nestjs/bullmq";
 import { Job, Queue } from "bullmq";
 import { BadRequestException } from "@nestjs/common";
 import { ConnectorFactory } from "@email-ops/connectors";
-import { ConnectorType, EncryptionService } from "@email-ops/core";
+import { DataConnectorType, EncryptionService } from "@email-ops/core";
 import { PrismaService } from "../prisma/prisma.service";
 
 @Processor("segment")
@@ -56,24 +56,24 @@ export class SegmentProcessor extends WorkerHost {
   private async buildAudienceSnapshot(runId: string) {
     if (!runId) throw new BadRequestException("runId is required");
 
-    const run = await this.prisma.campaignRun.findFirst({
+    const run = await this.prisma.singleSendRun.findFirst({
       where: { id: runId },
       include: {
-        campaign: {
+        singleSend: {
           include: {
-            segment: { include: { connector: true } },
+            segment: { include: { dataConnector: true } },
           },
         },
       },
     });
-    if (!run) throw new BadRequestException("CampaignRun not found");
+    if (!run) throw new BadRequestException("SingleSendRun not found");
 
-    const segment = run.campaign?.segment;
-    if (!segment) throw new BadRequestException("Campaign has no segment");
-    const connector = segment.connector;
+    const segment = run.singleSend?.segment;
+    if (!segment) throw new BadRequestException("SingleSend has no segment");
+    const connector = segment.dataConnector;
     if (!connector) throw new BadRequestException("Segment has no connector");
 
-    await this.prisma.campaignRun.update({
+    await this.prisma.singleSendRun.update({
       where: { id: runId },
       data: { status: "AUDIENCE_BUILDING" },
     });
@@ -83,9 +83,9 @@ export class SegmentProcessor extends WorkerHost {
 
     // ConnectorFactory currently supports POSTGRES | BIGQUERY.
     const adapterType =
-      connector.type === ConnectorType.POSTGRES
+      connector.type === DataConnectorType.POSTGRES
         ? "POSTGRES"
-        : connector.type === ConnectorType.BIGQUERY
+        : connector.type === DataConnectorType.BIGQUERY
           ? "BIGQUERY"
           : null;
     if (!adapterType) {
@@ -102,7 +102,7 @@ export class SegmentProcessor extends WorkerHost {
     try {
       const rows = await adapter.query<any>(segment.sqlQuery);
 
-      // Bulk insert into RunRecipient with idempotency.
+      // Bulk insert into SingleSendRecipient with idempotency.
       const batchSize = 500;
       let inserted = 0;
 
@@ -110,7 +110,12 @@ export class SegmentProcessor extends WorkerHost {
         const batch = rows.slice(i, i + batchSize);
         const data = batch
           .map((r) => {
-            const recipientId = r?.recipient_id ?? r?.recipientId ?? r?.id;
+            const subjectId =
+              r?.subject_id ??
+              r?.subjectId ??
+              r?.recipient_id ??
+              r?.recipientId ??
+              r?.id;
             const email = r?.email ?? r?.Email ?? r?.email_address;
             let vars = r?.vars ?? r?.variables ?? null;
             if (typeof vars === "string") {
@@ -120,10 +125,10 @@ export class SegmentProcessor extends WorkerHost {
                 // leave as string
               }
             }
-            if (!recipientId || !email) return null;
+            if (!subjectId || !email) return null;
             return {
               runId,
-              recipientId: String(recipientId),
+              subjectId: String(subjectId),
               email: String(email),
               vars: vars ?? undefined,
             };
@@ -132,14 +137,14 @@ export class SegmentProcessor extends WorkerHost {
 
         if (data.length === 0) continue;
 
-        const res = await this.prisma.runRecipient.createMany({
+        const res = await this.prisma.singleSendRecipient.createMany({
           data,
           skipDuplicates: true,
         });
         inserted += res.count;
       }
 
-      await this.prisma.campaignRun.update({
+      await this.prisma.singleSendRun.update({
         where: { id: runId },
         data: {
           status: "AUDIENCE_READY",
@@ -148,7 +153,7 @@ export class SegmentProcessor extends WorkerHost {
       });
 
       // Enqueue sends for all pending recipients (paged).
-      await this.prisma.campaignRun.update({
+      await this.prisma.singleSendRun.update({
         where: { id: runId },
         data: { status: "SENDING" },
       });
@@ -159,7 +164,7 @@ export class SegmentProcessor extends WorkerHost {
 
       for (;;) {
         const page: Array<{ id: string }> =
-          await this.prisma.runRecipient.findMany({
+          await this.prisma.singleSendRecipient.findMany({
             where: { runId, status: "PENDING" },
             orderBy: { id: "asc" },
             take: pageSize,
@@ -171,7 +176,7 @@ export class SegmentProcessor extends WorkerHost {
         for (const rr of page) {
           await this.sendQueue.add(
             "sendEmail",
-            { runRecipientId: rr.id },
+            { singleSendRecipientId: rr.id },
             {
               jobId: `send:${rr.id}`,
               attempts: 5,

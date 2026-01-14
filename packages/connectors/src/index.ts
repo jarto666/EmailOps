@@ -1,5 +1,5 @@
-import { Pool } from 'pg';
-import { BigQuery } from '@google-cloud/bigquery';
+import { Pool } from "pg";
+import { BigQuery } from "@google-cloud/bigquery";
 
 export interface DataConnectorAdapter {
   /**
@@ -24,15 +24,15 @@ export type BigQueryConfig = {
 function assertReadOnlySql(sql: string) {
   const normalized = sql.trim().toLowerCase();
   const startsOk =
-    normalized.startsWith('select') || normalized.startsWith('with');
+    normalized.startsWith("select") || normalized.startsWith("with");
   if (!startsOk) {
-    throw new Error('Only SELECT/CTE queries are allowed for data connectors.');
+    throw new Error("Only SELECT/CTE queries are allowed for data connectors.");
   }
   // Very simple DML/DDL guardrail (best-effort). Read-only transactions are the real enforcement for Postgres.
   const forbidden =
     /\b(insert|update|delete|upsert|merge|drop|alter|create|truncate|grant|revoke|comment|vacuum|analyze)\b/i;
   if (forbidden.test(sql)) {
-    throw new Error('Query contains forbidden DML/DDL keywords.');
+    throw new Error("Query contains forbidden DML/DDL keywords.");
   }
 }
 
@@ -42,21 +42,33 @@ export class PostgresAdapter implements DataConnectorAdapter {
 
   constructor(private config: PostgresConfig) {
     this.pool = new Pool({ connectionString: config.connectionString });
-    this.statementTimeoutMs = config.statementTimeoutMs ?? 15_000;
+    const raw = (config as any)?.statementTimeoutMs;
+    const n = Number(raw);
+    // Clamp to a sane range and avoid SQL injection by ensuring this is a finite integer.
+    const safeMs = Number.isFinite(n) ? Math.floor(n) : 15_000;
+    this.statementTimeoutMs = Math.min(Math.max(safeMs, 0), 10 * 60_000);
+  }
+
+  private async applySessionGuards(client: {
+    query: (sql: string) => Promise<any>;
+  }) {
+    // NOTE: Postgres does NOT allow bind params in SET statements (e.g. "SET ... = $1").
+    // We ensure the timeout is a finite integer in the constructor, so interpolation is safe here.
+    await client.query(
+      `SET LOCAL statement_timeout = ${this.statementTimeoutMs}`
+    );
   }
 
   async testConnection() {
     const client = await this.pool.connect();
     try {
-      await client.query('BEGIN READ ONLY');
-      await client.query('SET LOCAL statement_timeout = $1', [
-        this.statementTimeoutMs,
-      ]);
-      await client.query('SELECT 1 as ok');
-      await client.query('COMMIT');
+      await client.query("BEGIN READ ONLY");
+      await this.applySessionGuards(client);
+      await client.query("SELECT 1 as ok");
+      await client.query("COMMIT");
     } catch (e) {
       try {
-        await client.query('ROLLBACK');
+        await client.query("ROLLBACK");
       } catch {
         // ignore
       }
@@ -70,16 +82,14 @@ export class PostgresAdapter implements DataConnectorAdapter {
     assertReadOnlySql(sql);
     const client = await this.pool.connect();
     try {
-      await client.query('BEGIN READ ONLY');
-      await client.query('SET LOCAL statement_timeout = $1', [
-        this.statementTimeoutMs,
-      ]);
+      await client.query("BEGIN READ ONLY");
+      await this.applySessionGuards(client);
       const res = await client.query(sql, params);
-      await client.query('COMMIT');
+      await client.query("COMMIT");
       return (res.rows ?? []) as T[];
     } catch (e) {
       try {
-        await client.query('ROLLBACK');
+        await client.query("ROLLBACK");
       } catch {
         // ignore
       }
@@ -126,9 +136,12 @@ export class BigQueryAdapter implements DataConnectorAdapter {
 }
 
 export class ConnectorFactory {
-  static getConnector(type: 'POSTGRES' | 'BIGQUERY', config: any): DataConnectorAdapter {
-    if (type === 'POSTGRES') return new PostgresAdapter(config);
-    if (type === 'BIGQUERY') return new BigQueryAdapter(config);
+  static getConnector(
+    type: "POSTGRES" | "BIGQUERY",
+    config: any
+  ): DataConnectorAdapter {
+    if (type === "POSTGRES") return new PostgresAdapter(config);
+    if (type === "BIGQUERY") return new BigQueryAdapter(config);
     // Exhaustive guard
     throw new Error(`Unknown connector type: ${type}`);
   }

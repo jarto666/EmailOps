@@ -3,8 +3,8 @@ import { Job, Queue } from "bullmq";
 import { BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 
-@Processor("campaign")
-export class CampaignProcessor extends WorkerHost {
+@Processor("singleSend")
+export class SingleSendProcessor extends WorkerHost {
   constructor(
     private prisma: PrismaService,
     @InjectQueue("segment") private segmentQueue: Queue
@@ -14,29 +14,25 @@ export class CampaignProcessor extends WorkerHost {
 
   async process(job: Job<any, any, string>): Promise<any> {
     switch (job.name) {
-      case "triggerCampaign":
-        return this.triggerCampaign(job.data?.campaignId);
+      case "triggerSingleSend":
+        return this.triggerSingleSend(job.data?.singleSendId);
       default:
         throw new Error(`Unknown job ${job.name}`);
     }
   }
 
-  private async triggerCampaign(campaignId: string) {
-    if (!campaignId) throw new BadRequestException("campaignId is required");
+  private async triggerSingleSend(singleSendId: string) {
+    if (!singleSendId) throw new BadRequestException("singleSendId is required");
 
-    const campaign = await this.prisma.campaign.findFirst({
-      where: { id: campaignId },
-      select: {
-        id: true,
-        workspaceId: true,
-        segmentId: true,
-      },
+    const ss = await this.prisma.singleSend.findFirst({
+      where: { id: singleSendId },
+      select: { id: true },
     });
-    if (!campaign) throw new BadRequestException("Campaign not found");
+    if (!ss) throw new BadRequestException("Single send not found");
 
-    const run = await this.prisma.campaignRun.create({
+    const run = await this.prisma.singleSendRun.create({
       data: {
-        campaignId: campaign.id,
+        singleSendId: ss.id,
         status: "CREATED",
       },
     });

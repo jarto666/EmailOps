@@ -5,10 +5,10 @@ export default function Page() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <a
           className="p-4 border rounded shadow bg-white hover:bg-gray-50"
-          href="/campaigns"
+          href="/single-sends"
         >
-          <h2 className="font-semibold">Campaigns</h2>
-          <p>Manage email campaigns</p>
+          <h2 className="font-semibold">Single sends</h2>
+          <p>Send a one-off email to a segment</p>
         </a>
         <a
           className="p-4 border rounded shadow bg-white hover:bg-gray-50"

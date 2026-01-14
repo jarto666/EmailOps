@@ -2,13 +2,17 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { BullModule } from "@nestjs/bullmq";
 import { HealthModule } from "./health/health.module";
-import { ConnectorsModule } from "./connectors/connectors.module";
+import { DataConnectorsModule } from "./data-connectors/data-connectors.module";
+import { EmailConnectorsModule } from "./email-connectors/email-connectors.module";
+import { SenderProfilesModule } from "./sender-profiles/sender-profiles.module";
 import { TemplatesModule } from "./templates/templates.module";
 import { SegmentsModule } from "./segments/segments.module";
-import { CampaignsModule } from "./campaigns/campaigns.module";
+import { SingleSendsModule } from "./single-sends/single-sends.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 import { TransactionalModule } from "./transactional/transactional.module";
 import { PrismaModule } from "./prisma/prisma.module";
+import { EventsModule } from "./events/events.module";
+import { JourneysModule } from "./journeys/journeys.module";
 import { join } from "path";
 
 @Module({
@@ -30,10 +34,14 @@ import { join } from "path";
     }),
     HealthModule,
     PrismaModule,
-    ConnectorsModule,
+    EventsModule,
+    DataConnectorsModule,
+    EmailConnectorsModule,
+    SenderProfilesModule,
     TemplatesModule,
     SegmentsModule,
-    CampaignsModule,
+    SingleSendsModule,
+    JourneysModule,
     WebhooksModule,
     TransactionalModule,
   ],

@@ -13,9 +13,9 @@ type Connector = {
 type Segment = {
   id: string;
   name: string;
-  connectorId: string;
+  dataConnectorId: string;
   sqlQuery: string;
-  connector?: Connector;
+  dataConnector?: Connector;
 };
 
 type DryRunResult = {
@@ -36,7 +36,7 @@ export default function SegmentEditor({
   const [saving, setSaving] = useState(false);
 
   const [name, setName] = useState("");
-  const [connectorId, setConnectorId] = useState("");
+  const [dataConnectorId, setDataConnectorId] = useState("");
   const [sqlQuery, setSqlQuery] = useState("");
 
   const [preview, setPreview] = useState<DryRunResult | null>(null);
@@ -53,20 +53,20 @@ export default function SegmentEditor({
     try {
       const [s, cs] = await Promise.all([
         apiFetch<any>(`/segments/${segmentId}`, { query: { workspaceId } }),
-        apiFetch<Connector[]>("/connectors", { query: { workspaceId } }),
+        apiFetch<Connector[]>("/data-connectors", { query: { workspaceId } }),
       ]);
 
       const seg: Segment = {
         id: s.id,
         name: s.name,
-        connectorId: s.connectorId,
+        dataConnectorId: s.dataConnectorId,
         sqlQuery: s.sqlQuery,
-        connector: s.connector,
+        dataConnector: s.dataConnector,
       };
       setSegment(seg);
       setConnectors(cs);
       setName(seg.name);
-      setConnectorId(seg.connectorId);
+      setDataConnectorId(seg.dataConnectorId);
       setSqlQuery(seg.sqlQuery);
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -85,7 +85,7 @@ export default function SegmentEditor({
       await apiFetch<Segment>(`/segments/${segmentId}`, {
         method: "PATCH",
         query: { workspaceId },
-        body: JSON.stringify({ name, connectorId, sqlQuery }),
+        body: JSON.stringify({ name, dataConnectorId, sqlQuery }),
       });
       await loadAll();
     } catch (e: any) {
@@ -103,13 +103,16 @@ export default function SegmentEditor({
       await apiFetch<Segment>(`/segments/${segmentId}`, {
         method: "PATCH",
         query: { workspaceId },
-        body: JSON.stringify({ name, connectorId, sqlQuery }),
+        body: JSON.stringify({ name, dataConnectorId, sqlQuery }),
       });
-      const out = await apiFetch<DryRunResult>(`/segments/${segmentId}/dry-run`, {
-        method: "POST",
-        query: { workspaceId },
-        body: JSON.stringify({ limit: previewLimit }),
-      });
+      const out = await apiFetch<DryRunResult>(
+        `/segments/${segmentId}/dry-run`,
+        {
+          method: "POST",
+          query: { workspaceId },
+          body: JSON.stringify({ limit: previewLimit }),
+        }
+      );
       setPreview(out);
       await loadAll();
     } catch (e: any) {
@@ -228,8 +231,8 @@ export default function SegmentEditor({
                 {connectors.length > 0 ? (
                   <select
                     className="w-full border rounded px-3 py-2"
-                    value={connectorId}
-                    onChange={(e) => setConnectorId(e.target.value)}
+                    value={dataConnectorId}
+                    onChange={(e) => setDataConnectorId(e.target.value)}
                   >
                     {connectors.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -240,9 +243,9 @@ export default function SegmentEditor({
                 ) : (
                   <input
                     className="w-full border rounded px-3 py-2 font-mono text-xs"
-                    value={connectorId}
-                    onChange={(e) => setConnectorId(e.target.value)}
-                    placeholder="connectorId"
+                    value={dataConnectorId}
+                    onChange={(e) => setDataConnectorId(e.target.value)}
+                    placeholder="dataConnectorId"
                   />
                 )}
               </label>
@@ -274,16 +277,16 @@ export default function SegmentEditor({
                 min={1}
                 max={100}
                 value={previewLimit}
-                onChange={(e) => setPreviewLimit(parseInt(e.target.value || "25", 10))}
+                onChange={(e) =>
+                  setPreviewLimit(parseInt(e.target.value || "25", 10))
+                }
               />
             </div>
           </div>
           <div className="p-4 space-y-3">
             <div className="text-sm text-gray-700">
               Count:{" "}
-              <span className="font-mono">
-                {preview ? preview.count : "—"}
-              </span>
+              <span className="font-mono">{preview ? preview.count : "—"}</span>
             </div>
 
             {preview && preview.rows.length > 0 ? (
@@ -320,12 +323,13 @@ export default function SegmentEditor({
               <div className="text-sm text-gray-600">No rows returned.</div>
             ) : (
               <div className="text-sm text-gray-600">
-                Click <span className="font-semibold">Run preview</span> to execute the
-                query.
+                Click <span className="font-semibold">Run preview</span> to
+                execute the query.
               </div>
             )}
             <div className="text-xs text-gray-500">
-              Uses API <span className="font-mono">POST /segments/:id/dry-run</span>.
+              Uses API{" "}
+              <span className="font-mono">POST /segments/:id/dry-run</span>.
             </div>
           </div>
         </div>
@@ -333,4 +337,3 @@ export default function SegmentEditor({
     </div>
   );
 }
-

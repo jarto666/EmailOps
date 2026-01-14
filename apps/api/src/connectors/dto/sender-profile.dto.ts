@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString } from "class-validator";
 
 export class CreateSenderProfileDto {
   @IsString()
@@ -7,7 +7,7 @@ export class CreateSenderProfileDto {
 
   @IsString()
   @IsNotEmpty()
-  connectorId!: string;
+  emailProviderConnectorId!: string;
 
   @IsEmail()
   fromEmail!: string;
@@ -34,4 +34,3 @@ export class UpdateSenderProfileDto {
   @IsOptional()
   replyTo?: string;
 }
-

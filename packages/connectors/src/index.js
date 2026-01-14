@@ -19,15 +19,22 @@ class PostgresAdapter {
     constructor(config) {
         this.config = config;
         this.pool = new pg_1.Pool({ connectionString: config.connectionString });
-        this.statementTimeoutMs = config.statementTimeoutMs ?? 15000;
+        const raw = config?.statementTimeoutMs;
+        const n = Number(raw);
+        // Clamp to a sane range and avoid SQL injection by ensuring this is a finite integer.
+        const safeMs = Number.isFinite(n) ? Math.floor(n) : 15000;
+        this.statementTimeoutMs = Math.min(Math.max(safeMs, 0), 10 * 60_000);
+    }
+    async applySessionGuards(client) {
+        // NOTE: Postgres does NOT allow bind params in SET statements (e.g. "SET ... = $1").
+        // We ensure the timeout is a finite integer in the constructor, so interpolation is safe here.
+        await client.query(`SET LOCAL statement_timeout = ${this.statementTimeoutMs}`);
     }
     async testConnection() {
         const client = await this.pool.connect();
         try {
             await client.query('BEGIN READ ONLY');
-            await client.query('SET LOCAL statement_timeout = $1', [
-                this.statementTimeoutMs,
-            ]);
+            await this.applySessionGuards(client);
             await client.query('SELECT 1 as ok');
             await client.query('COMMIT');
         }
@@ -49,9 +56,7 @@ class PostgresAdapter {
         const client = await this.pool.connect();
         try {
             await client.query('BEGIN READ ONLY');
-            await client.query('SET LOCAL statement_timeout = $1', [
-                this.statementTimeoutMs,
-            ]);
+            await this.applySessionGuards(client);
             const res = await client.query(sql, params);
             await client.query('COMMIT');
             return (res.rows ?? []);

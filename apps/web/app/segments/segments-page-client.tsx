@@ -13,9 +13,9 @@ type Connector = {
 type Segment = {
   id: string;
   name: string;
-  connectorId: string;
+  dataConnectorId: string;
   sqlQuery: string;
-  connector?: Connector;
+  dataConnector?: Connector;
 };
 
 export default function SegmentsPageClient({
@@ -29,7 +29,7 @@ export default function SegmentsPageClient({
   const [loading, setLoading] = useState(false);
 
   const [name, setName] = useState("");
-  const [connectorId, setConnectorId] = useState("");
+  const [dataConnectorId, setDataConnectorId] = useState("");
   const [sqlQuery, setSqlQuery] = useState(
     `select\n  'user_1'::text as recipient_id,\n  'user1@example.com'::text as email,\n  jsonb_build_object('user', jsonb_build_object('firstName','Ava')) as vars`
   );
@@ -45,11 +45,12 @@ export default function SegmentsPageClient({
     try {
       const [segmentsData, connectorsData] = await Promise.all([
         apiFetch<Segment[]>("/segments", { query: { workspaceId } }),
-        apiFetch<Connector[]>("/connectors", { query: { workspaceId } }),
+        apiFetch<Connector[]>("/data-connectors", { query: { workspaceId } }),
       ]);
       setItems(segmentsData);
       setConnectors(connectorsData);
-      if (!connectorId && connectorsData[0]?.id) setConnectorId(connectorsData[0].id);
+      if (!dataConnectorId && connectorsData[0]?.id)
+        setDataConnectorId(connectorsData[0].id);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -67,7 +68,7 @@ export default function SegmentsPageClient({
     try {
       await apiFetch<Segment>("/segments", {
         method: "POST",
-        body: JSON.stringify({ workspaceId, name, connectorId, sqlQuery }),
+        body: JSON.stringify({ workspaceId, name, dataConnectorId, sqlQuery }),
       });
       setName("");
       await load();
@@ -115,8 +116,8 @@ export default function SegmentsPageClient({
             {connectors.length > 0 ? (
               <select
                 className="w-full border rounded px-3 py-2"
-                value={connectorId}
-                onChange={(e) => setConnectorId(e.target.value)}
+                value={dataConnectorId}
+                onChange={(e) => setDataConnectorId(e.target.value)}
               >
                 {connectors.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -127,9 +128,9 @@ export default function SegmentsPageClient({
             ) : (
               <input
                 className="w-full border rounded px-3 py-2 font-mono text-xs"
-                value={connectorId}
-                onChange={(e) => setConnectorId(e.target.value)}
-                placeholder="connectorId (no connectors found)"
+                value={dataConnectorId}
+                onChange={(e) => setDataConnectorId(e.target.value)}
+                placeholder="dataConnectorId (no connectors found)"
               />
             )}
           </label>
@@ -152,7 +153,7 @@ export default function SegmentsPageClient({
           <button
             className="px-4 py-2 rounded bg-indigo-600 text-white text-sm disabled:opacity-50"
             onClick={createSegment}
-            disabled={!name || !connectorId || !sqlQuery}
+            disabled={!name || !dataConnectorId || !sqlQuery}
           >
             Create
           </button>
@@ -198,7 +199,7 @@ export default function SegmentsPageClient({
                 <div className="text-xs text-gray-600">
                   Connector:{" "}
                   <span className="font-mono">
-                    {s.connector?.name ?? s.connectorId}
+                    {s.dataConnector?.name ?? s.dataConnectorId}
                   </span>
                 </div>
               </div>

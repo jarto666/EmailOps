@@ -1,7 +1,7 @@
 import { Processor, WorkerHost } from "@nestjs/bullmq";
 import { Job } from "bullmq";
 import { BadRequestException } from "@nestjs/common";
-import { AuthoringMode, ConnectorType, EncryptionService } from "@email-ops/core";
+import { AuthoringMode, EmailProviderType, EncryptionService } from "@email-ops/core";
 import { EmailCompiler } from "@email-ops/email";
 import { SesService } from "@email-ops/ses";
 import { PrismaService } from "../prisma/prisma.service";
@@ -9,7 +9,7 @@ import { PrismaService } from "../prisma/prisma.service";
 @Processor("send")
 export class SendProcessor extends WorkerHost {
   private encryption: EncryptionService;
-  private static nextAllowedBySenderProfile = new Map<string, number>();
+  private redis: any | null = null;
 
   constructor(private prisma: PrismaService) {
     super();
@@ -22,11 +22,25 @@ export class SendProcessor extends WorkerHost {
     this.encryption = new EncryptionService(secret);
   }
 
+  private getRedisClient() {
+    if (this.redis) return this.redis;
+    // BullMQ already depends on ioredis; use dynamic require to avoid hard dependency in TS types.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Redis = require("ioredis") as any;
+    this.redis = new Redis({
+      host: process.env.REDIS_HOST || "localhost",
+      port: parseInt(process.env.REDIS_PORT || "6379", 10),
+    });
+    return this.redis;
+  }
+
   async process(job: Job<any, any, string>): Promise<any> {
     console.log(`Processing send job ${job.name}`);
     switch (job.name) {
       case "sendEmail":
         return this.sendEmail(job);
+      case "sendJourneyEmail":
+        return this.sendJourneyEmail(job);
       default:
         throw new Error(`Unknown job ${job.name}`);
     }
@@ -73,18 +87,30 @@ export class SendProcessor extends WorkerHost {
     if (!senderProfileId || !Number.isFinite(ratePerSecond) || ratePerSecond <= 0)
       return;
 
-    // MVP: in-memory pacing per worker instance (good enough for single worker).
     const spacingMs = Math.ceil(1000 / ratePerSecond);
     const now = Date.now();
-    const nextAllowed =
-      SendProcessor.nextAllowedBySenderProfile.get(senderProfileId) ?? now;
-    const startAt = Math.max(now, nextAllowed);
-    SendProcessor.nextAllowedBySenderProfile.set(senderProfileId, startAt + spacingMs);
 
-    const delay = startAt - now;
-    if (delay > 0) {
-      await new Promise((r) => setTimeout(r, delay));
-    }
+    // Redis-backed leaky bucket / pacing to be safe across multiple workers.
+    const redis = this.getRedisClient();
+    const key = `rate:senderProfile:${senderProfileId}`;
+    const ttlMs = 60_000;
+
+    const script = `
+      local key = KEYS[1]
+      local now = tonumber(ARGV[1])
+      local spacing = tonumber(ARGV[2])
+      local ttl = tonumber(ARGV[3])
+      local next = tonumber(redis.call('GET', key) or '0')
+      local startAt = now
+      if next > now then startAt = next end
+      local newNext = startAt + spacing
+      redis.call('SET', key, newNext, 'PX', ttl)
+      return startAt - now
+    `;
+
+    const delayMs = await redis.eval(script, 1, key, String(now), String(spacingMs), String(ttlMs));
+    const delay = typeof delayMs === "number" ? delayMs : parseInt(String(delayMs || "0"), 10);
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
   }
 
   private compileAndRender(version: any, variables: Record<string, any>) {
@@ -122,36 +148,37 @@ export class SendProcessor extends WorkerHost {
   }
 
   private async sendEmail(job: Job<any, any, string>) {
-    const runRecipientId = job.data?.runRecipientId;
-    if (!runRecipientId) throw new BadRequestException("runRecipientId is required");
+    const singleSendRecipientId = job.data?.singleSendRecipientId;
+    if (!singleSendRecipientId)
+      throw new BadRequestException("singleSendRecipientId is required");
 
-    const rr = await this.prisma.runRecipient.findFirst({
-      where: { id: runRecipientId },
+    const rr = await this.prisma.singleSendRecipient.findFirst({
+      where: { id: singleSendRecipientId },
       include: {
         run: {
           include: {
-            campaign: {
+            singleSend: {
               include: {
                 template: true,
-                senderProfile: { include: { connector: true } },
+                senderProfile: { include: { emailProviderConnector: true } },
               },
             },
           },
         },
       },
     });
-    if (!rr) throw new BadRequestException("RunRecipient not found");
+    if (!rr) throw new BadRequestException("SingleSendRecipient not found");
 
-    const campaign = rr.run?.campaign;
-    if (!campaign) throw new BadRequestException("Campaign not found for run");
+    const singleSend = rr.run?.singleSend;
+    if (!singleSend) throw new BadRequestException("SingleSend not found for run");
 
     // Idempotency / Send record
-    const idempotencyKey = `runRecipient:${runRecipientId}`;
+    const idempotencyKey = `singleSendRecipient:${singleSendRecipientId}`;
     const send = await this.prisma.send.upsert({
       where: { idempotencyKey },
       create: {
-        workspaceId: campaign.workspaceId,
-        runRecipientId,
+        workspaceId: singleSend.workspaceId,
+        singleSendRecipientId,
         idempotencyKey,
         status: "QUEUED",
         attempts: 1,
@@ -166,21 +193,21 @@ export class SendProcessor extends WorkerHost {
       return { ok: true, skipped: true };
     }
 
-    const senderProfile = campaign.senderProfile;
+    const senderProfile = singleSend.senderProfile;
     if (!senderProfile) throw new BadRequestException("SenderProfile missing");
-    const connector = senderProfile.connector;
+    const connector = senderProfile.emailProviderConnector;
     if (!connector) throw new BadRequestException("SenderProfile connector missing");
 
     // Rate limit: campaign policy overrides env default
     const ratePerSecond =
-      Number((campaign.policies as any)?.rateLimitPerSecond) ||
+      Number((singleSend.policies as any)?.rateLimitPerSecond) ||
       Number(process.env.DEFAULT_RATE_LIMIT_PER_SECOND) ||
       10;
     await this.applyRateLimit(senderProfile.id, ratePerSecond);
 
     // Load active template version
     const version = await this.prisma.templateVersion.findFirst({
-      where: { templateId: campaign.templateId, active: true },
+      where: { templateId: singleSend.templateId, active: true },
       orderBy: { createdAt: "desc" },
     });
     if (!version) {
@@ -198,7 +225,7 @@ export class SendProcessor extends WorkerHost {
       : senderProfile.fromEmail;
 
     try {
-      if (connector.type !== ConnectorType.SES) {
+      if (connector.type !== EmailProviderType.SES) {
         throw new BadRequestException(
           `Sending not implemented for connector type: ${connector.type}`
         );
@@ -226,7 +253,7 @@ export class SendProcessor extends WorkerHost {
             providerMessageId: resp?.MessageId ?? resp?.messageId ?? undefined,
           },
         }),
-        this.prisma.runRecipient.update({
+        this.prisma.singleSendRecipient.update({
           where: { id: rr.id },
           data: { status: "SENT", skipReason: null },
         }),
@@ -243,7 +270,7 @@ export class SendProcessor extends WorkerHost {
           where: { id: send.id },
           data: { status: isFinalAttempt ? "FAILED" : "QUEUED" },
         }),
-        this.prisma.runRecipient.update({
+        this.prisma.singleSendRecipient.update({
           where: { id: rr.id },
           data: {
             status: isFinalAttempt ? "FAILED" : "PENDING",
@@ -252,6 +279,103 @@ export class SendProcessor extends WorkerHost {
         }),
       ]);
 
+      throw e;
+    }
+  }
+
+  private async sendJourneyEmail(job: Job<any, any, string>) {
+    const workspaceId = job.data?.workspaceId;
+    const to = job.data?.to;
+    const templateId = job.data?.templateId;
+    const senderProfileId = job.data?.senderProfileId;
+    const variables = (job.data?.variables && typeof job.data.variables === "object")
+      ? (job.data.variables as any)
+      : {};
+    const idempotencyKey = job.data?.idempotencyKey;
+
+    if (!workspaceId) throw new BadRequestException("workspaceId is required");
+    if (!to) throw new BadRequestException("to is required");
+    if (!templateId) throw new BadRequestException("templateId is required");
+    if (!senderProfileId) throw new BadRequestException("senderProfileId is required");
+    if (!idempotencyKey) throw new BadRequestException("idempotencyKey is required");
+
+    const send = await this.prisma.send.upsert({
+      where: { idempotencyKey },
+      create: {
+        workspaceId,
+        idempotencyKey,
+        status: "QUEUED",
+        attempts: 1,
+      },
+      update: { attempts: { increment: 1 } },
+    });
+
+    if (send.status === "SENT") return { ok: true, skipped: true };
+
+    const senderProfile = await this.prisma.senderProfile.findFirst({
+      where: { id: senderProfileId, workspaceId },
+      include: { emailProviderConnector: true },
+    });
+    if (!senderProfile) throw new BadRequestException("SenderProfile not found");
+    const connector = senderProfile.emailProviderConnector;
+    if (!connector) throw new BadRequestException("SenderProfile connector missing");
+
+    const ratePerSecond =
+      Number(process.env.DEFAULT_RATE_LIMIT_PER_SECOND) || 10;
+    await this.applyRateLimit(senderProfile.id, ratePerSecond);
+
+    const version = await this.prisma.templateVersion.findFirst({
+      where: { templateId, active: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!version) {
+      throw new BadRequestException(
+        "No active template version. Publish a template version first."
+      );
+    }
+
+    const compiled = this.compileAndRender(version, variables);
+    const from = senderProfile.fromName
+      ? `${senderProfile.fromName} <${senderProfile.fromEmail}>`
+      : senderProfile.fromEmail;
+
+    try {
+      if (connector.type !== EmailProviderType.SES) {
+        throw new BadRequestException(
+          `Sending not implemented for connector type: ${connector.type}`
+        );
+      }
+      const sesCfg = this.normalizeSesConfig(
+        this.decryptConnectorConfig(connector.config)
+      );
+      const ses = new SesService(sesCfg.region, {
+        accessKeyId: sesCfg.accessKeyId,
+        secretAccessKey: sesCfg.secretAccessKey,
+      });
+
+      const resp: any = await ses.sendEmail({
+        from,
+        to: [String(to)],
+        subject: compiled.subject,
+        html: compiled.html,
+      });
+
+      await this.prisma.send.update({
+        where: { id: send.id },
+        data: {
+          status: "SENT",
+          providerMessageId: resp?.MessageId ?? resp?.messageId ?? undefined,
+        },
+      });
+
+      return { ok: true, status: "sent", messageId: resp?.MessageId ?? null };
+    } catch (e: any) {
+      const isFinalAttempt =
+        (job.opts.attempts ?? 1) <= (job.attemptsMade ?? 0) + 1;
+      await this.prisma.send.update({
+        where: { id: send.id },
+        data: { status: isFinalAttempt ? "FAILED" : "QUEUED" },
+      });
       throw e;
     }
   }

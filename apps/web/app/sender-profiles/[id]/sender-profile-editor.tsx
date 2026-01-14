@@ -6,7 +6,7 @@ import { apiFetch } from "../../lib/api";
 
 type SenderProfile = {
   id: string;
-  connectorId: string;
+  emailProviderConnectorId: string;
   fromEmail: string;
   fromName?: string | null;
   replyTo?: string | null;
@@ -103,8 +103,10 @@ export default function SenderProfileEditor({
             {profile ? profile.fromEmail : "Sender profile"}
           </h1>
           <div className="text-xs text-gray-600 mt-1">
-            id <span className="font-mono">{senderProfileId}</span> · connector{" "}
-            <span className="font-mono">{profile?.connectorId ?? "—"}</span>
+            id <span className="font-mono">{senderProfileId}</span> · email connector{" "}
+            <span className="font-mono">
+              {profile?.emailProviderConnectorId ?? "—"}
+            </span>
           </div>
         </div>
         <div className="flex gap-2">

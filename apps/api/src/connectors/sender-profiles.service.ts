@@ -1,5 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
 
 @Injectable()
 export class SenderProfilesService {
@@ -7,25 +11,28 @@ export class SenderProfilesService {
 
   async create(input: {
     workspaceId: string;
-    connectorId: string;
+    emailProviderConnectorId: string;
     fromEmail: string;
     fromName?: string;
     replyTo?: string;
   }) {
-    const connector = await this.prisma.connector.findFirst({
-      where: { id: input.connectorId, workspaceId: input.workspaceId },
+    const connector = await this.prisma.emailProviderConnector.findFirst({
+      where: {
+        id: input.emailProviderConnectorId,
+        workspaceId: input.workspaceId,
+      },
       select: { id: true },
     });
     if (!connector) {
       throw new BadRequestException(
-        'connectorId must refer to an existing connector in the same workspace.',
+        "emailProviderConnectorId must refer to an existing email provider connector in the same workspace."
       );
     }
 
     return this.prisma.senderProfile.create({
       data: {
         workspaceId: input.workspaceId,
-        connectorId: input.connectorId,
+        emailProviderConnectorId: input.emailProviderConnectorId,
         fromEmail: input.fromEmail,
         fromName: input.fromName ?? undefined,
         replyTo: input.replyTo ?? undefined,
@@ -36,7 +43,7 @@ export class SenderProfilesService {
   async list(workspaceId: string) {
     return this.prisma.senderProfile.findMany({
       where: { workspaceId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
     });
   }
 
@@ -44,7 +51,7 @@ export class SenderProfilesService {
     const profile = await this.prisma.senderProfile.findFirst({
       where: { id, workspaceId },
     });
-    if (!profile) throw new NotFoundException('Sender profile not found');
+    if (!profile) throw new NotFoundException("Sender profile not found");
     return profile;
   }
 
@@ -53,7 +60,7 @@ export class SenderProfilesService {
       where: { id, workspaceId },
       select: { id: true },
     });
-    if (!existing) throw new NotFoundException('Sender profile not found');
+    if (!existing) throw new NotFoundException("Sender profile not found");
 
     return this.prisma.senderProfile.update({
       where: { id },
@@ -70,9 +77,8 @@ export class SenderProfilesService {
       where: { id, workspaceId },
       select: { id: true },
     });
-    if (!existing) throw new NotFoundException('Sender profile not found');
+    if (!existing) throw new NotFoundException("Sender profile not found");
     await this.prisma.senderProfile.delete({ where: { id } });
     return { ok: true };
   }
 }
-

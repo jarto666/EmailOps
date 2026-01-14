@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
-import { CampaignStatus, ScheduleType } from "@email-ops/core";
+import { ScheduleType, SingleSendStatus } from "@email-ops/core";
 import { PrismaService } from "../prisma/prisma.service";
 
 function validateCron(cronExpression: string | undefined, scheduleType: any) {
@@ -9,7 +9,6 @@ function validateCron(cronExpression: string | undefined, scheduleType: any) {
   if (typeof cronExpression !== "string" || cronExpression.trim().length === 0) {
     throw new BadRequestException("cronExpression is required when scheduleType=CRON.");
   }
-  // Minimal check; BullMQ will validate further.
   const parts = cronExpression.trim().split(/\s+/);
   if (parts.length < 5 || parts.length > 6) {
     throw new BadRequestException("cronExpression must have 5 or 6 fields.");
@@ -17,43 +16,42 @@ function validateCron(cronExpression: string | undefined, scheduleType: any) {
 }
 
 @Injectable()
-export class CampaignsService {
+export class SingleSendsService {
   constructor(
     private prisma: PrismaService,
-    @InjectQueue("campaign") private campaignQueue: Queue
+    @InjectQueue("singleSend") private singleSendQueue: Queue
   ) {}
 
-  private cronJobId(campaignId: string) {
-    return `campaign:${campaignId}:cron`;
+  private cronJobId(singleSendId: string) {
+    return `singleSend:${singleSendId}:cron`;
   }
 
-  private async upsertSchedule(campaign: {
+  private async upsertSchedule(singleSend: {
     id: string;
     scheduleType: any;
     cronExpression: string | null;
   }) {
-    // Remove existing repeatable job, if any (safe idempotent cleanup).
-    const jobId = this.cronJobId(campaign.id);
-    const existing = await this.campaignQueue.getRepeatableJobs();
+    const jobId = this.cronJobId(singleSend.id);
+    const existing = await this.singleSendQueue.getRepeatableJobs();
     for (const r of existing) {
       if (r.id === jobId || r.key?.includes(jobId)) {
         try {
-          await this.campaignQueue.removeRepeatableByKey(r.key);
+          await this.singleSendQueue.removeRepeatableByKey(r.key);
         } catch {
           // ignore
         }
       }
     }
 
-    if (campaign.scheduleType !== ScheduleType.CRON) return;
-    validateCron(campaign.cronExpression ?? undefined, ScheduleType.CRON);
+    if (singleSend.scheduleType !== ScheduleType.CRON) return;
+    validateCron(singleSend.cronExpression ?? undefined, ScheduleType.CRON);
 
-    await this.campaignQueue.add(
-      "triggerCampaign",
-      { campaignId: campaign.id },
+    await this.singleSendQueue.add(
+      "triggerSingleSend",
+      { singleSendId: singleSend.id },
       {
         jobId,
-        repeat: { pattern: campaign.cronExpression as string },
+        repeat: { pattern: singleSend.cronExpression as string },
         removeOnComplete: true,
         removeOnFail: 100,
       }
@@ -64,7 +62,7 @@ export class CampaignsService {
     workspaceId: string;
     name: string;
     description?: string;
-    status?: CampaignStatus;
+    status?: SingleSendStatus;
     templateId: string;
     segmentId: string;
     senderProfileId: string;
@@ -79,14 +77,12 @@ export class CampaignsService {
       throw new BadRequestException("name is required.");
     }
 
-    // Ensure workspace exists (matches patterns in TemplatesService).
     await this.prisma.workspace.upsert({
       where: { id: input.workspaceId },
       update: {},
       create: { id: input.workspaceId, name: "Default Workspace" },
     });
 
-    // Validate FK refs are in the same workspace (clearer errors than FK violations).
     const [template, segment, senderProfile] = await Promise.all([
       this.prisma.template.findFirst({
         where: { id: input.templateId, workspaceId: input.workspaceId },
@@ -109,12 +105,12 @@ export class CampaignsService {
     const scheduleType = input.scheduleType ?? ScheduleType.MANUAL;
     validateCron(input.cronExpression, scheduleType);
 
-    const created = await this.prisma.campaign.create({
+    const created = await this.prisma.singleSend.create({
       data: {
         workspaceId: input.workspaceId,
         name: input.name,
         description: input.description ?? undefined,
-        status: input.status ?? CampaignStatus.DRAFT,
+        status: input.status ?? SingleSendStatus.DRAFT,
         templateId: input.templateId,
         segmentId: input.segmentId,
         senderProfileId: input.senderProfileId,
@@ -129,7 +125,7 @@ export class CampaignsService {
   }
 
   async list(workspaceId: string) {
-    return this.prisma.campaign.findMany({
+    return this.prisma.singleSend.findMany({
       where: { workspaceId },
       orderBy: { createdAt: "desc" },
       include: {
@@ -141,7 +137,7 @@ export class CampaignsService {
   }
 
   async get(workspaceId: string, id: string) {
-    const campaign = await this.prisma.campaign.findFirst({
+    const ss = await this.prisma.singleSend.findFirst({
       where: { id, workspaceId },
       include: {
         template: { select: { id: true, name: true, key: true } },
@@ -150,16 +146,16 @@ export class CampaignsService {
         runs: { orderBy: { createdAt: "desc" }, take: 25 },
       },
     });
-    if (!campaign) throw new NotFoundException("Campaign not found");
-    return campaign;
+    if (!ss) throw new NotFoundException("Single send not found");
+    return ss;
   }
 
   async update(workspaceId: string, id: string, input: any) {
-    const existing = await this.prisma.campaign.findFirst({
+    const existing = await this.prisma.singleSend.findFirst({
       where: { id, workspaceId },
       select: { id: true },
     });
-    if (!existing) throw new NotFoundException("Campaign not found");
+    if (!existing) throw new NotFoundException("Single send not found");
 
     if (input.templateId) {
       const ok = await this.prisma.template.findFirst({
@@ -183,13 +179,11 @@ export class CampaignsService {
       if (!ok) throw new BadRequestException("senderProfileId is invalid for workspace.");
     }
 
-    const scheduleType =
-      input.scheduleType != null ? input.scheduleType : undefined;
-    const cronExpression =
-      input.cronExpression != null ? input.cronExpression : undefined;
+    const scheduleType = input.scheduleType != null ? input.scheduleType : undefined;
+    const cronExpression = input.cronExpression != null ? input.cronExpression : undefined;
     validateCron(cronExpression, scheduleType ?? ScheduleType.MANUAL);
 
-    const updated = await this.prisma.campaign.update({
+    const updated = await this.prisma.singleSend.update({
       where: { id },
       data: {
         name: input.name ?? undefined,
@@ -209,35 +203,29 @@ export class CampaignsService {
   }
 
   async remove(workspaceId: string, id: string) {
-    const existing = await this.prisma.campaign.findFirst({
+    const existing = await this.prisma.singleSend.findFirst({
       where: { id, workspaceId },
       select: { id: true },
     });
-    if (!existing) throw new NotFoundException("Campaign not found");
+    if (!existing) throw new NotFoundException("Single send not found");
 
-    // Unschedule any repeatables then delete.
-    await this.upsertSchedule({
-      id,
-      scheduleType: ScheduleType.MANUAL,
-      cronExpression: null,
-    });
-
-    await this.prisma.campaign.delete({ where: { id } });
+    await this.upsertSchedule({ id, scheduleType: ScheduleType.MANUAL, cronExpression: null });
+    await this.prisma.singleSend.delete({ where: { id } });
     return { ok: true };
   }
 
-  async trigger(workspaceId: string, campaignId: string) {
-    const campaign = await this.prisma.campaign.findFirst({
-      where: { id: campaignId, workspaceId },
+  async trigger(workspaceId: string, singleSendId: string) {
+    const ss = await this.prisma.singleSend.findFirst({
+      where: { id: singleSendId, workspaceId },
       select: { id: true },
     });
-    if (!campaign) throw new NotFoundException("Campaign not found");
+    if (!ss) throw new NotFoundException("Single send not found");
 
-    const job = await this.campaignQueue.add(
-      "triggerCampaign",
-      { campaignId },
+    const job = await this.singleSendQueue.add(
+      "triggerSingleSend",
+      { singleSendId },
       {
-        jobId: `campaign:${campaignId}:manual:${Date.now()}`,
+        jobId: `singleSend:${singleSendId}:manual:${Date.now()}`,
         removeOnComplete: true,
         removeOnFail: 100,
       }

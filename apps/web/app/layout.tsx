@@ -24,10 +24,13 @@ export default function RootLayout({
                 EmailOps
               </span>
               <div className="space-x-4 text-sm text-gray-600">
-                <a href="/campaigns">Campaigns</a>
+                <a href="/single-sends">Single sends</a>
+                <a href="/journeys">Journeys</a>
                 <a href="/segments">Segments</a>
                 <a href="/templates">Templates</a>
-                <a href="/connectors">Connectors</a>
+                <a href="/data-connectors">Data connectors</a>
+                <a href="/email-connectors">Email connectors</a>
+                <a href="/sender-profiles">Sender profiles</a>
               </div>
             </div>
           </nav>
