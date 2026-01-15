@@ -1,181 +1,366 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { apiFetch } from "../lib/api";
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import {
+  Database,
+  Plus,
+  Search,
+  MoreVertical,
+  Edit2,
+  Trash2,
+  X,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  Plug,
+  Server,
+} from 'lucide-react';
 
-type DataConnectorType = "POSTGRES" | "BIGQUERY";
+// Mock data
+const mockConnectors = [
+  {
+    id: '1',
+    name: 'Production Database',
+    type: 'POSTGRES',
+    status: 'connected',
+    lastChecked: '2024-01-14T10:30:00Z',
+    segmentsCount: 5,
+    createdAt: '2024-01-01',
+  },
+  {
+    id: '2',
+    name: 'Analytics Warehouse',
+    type: 'BIGQUERY',
+    status: 'connected',
+    lastChecked: '2024-01-14T10:25:00Z',
+    segmentsCount: 3,
+    createdAt: '2024-01-05',
+  },
+  {
+    id: '3',
+    name: 'Staging DB',
+    type: 'POSTGRES',
+    status: 'error',
+    lastChecked: '2024-01-14T09:00:00Z',
+    segmentsCount: 0,
+    error: 'Connection timeout',
+    createdAt: '2024-01-10',
+  },
+];
 
-type DataConnector = {
-  id: string;
-  name: string;
-  type: DataConnectorType;
-  config?: any;
-};
+function ConnectorTypeBadge({ type }: { type: string }) {
+  const styles = {
+    POSTGRES: { class: 'badge-primary', icon: '🐘' },
+    BIGQUERY: { class: 'badge-warning', icon: '📊' },
+  };
 
-function defaultConfigFor(type: DataConnectorType): any {
-  switch (type) {
-    case "POSTGRES":
-      return { connectionString: "postgresql://user:pass@host:5432/db" };
-    case "BIGQUERY":
-      return { projectId: "my-project", credentials: { client_email: "", private_key: "" } };
-    default:
-      return {};
-  }
-}
-
-export default function DataConnectorsPageClient({ workspaceId }: { workspaceId: string }) {
-  const [items, setItems] = useState<DataConnector[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const [name, setName] = useState("");
-  const [type, setType] = useState<DataConnectorType>("POSTGRES");
-  const [configJson, setConfigJson] = useState(
-    JSON.stringify(defaultConfigFor("POSTGRES"), null, 2)
-  );
-
-  const listUrl = useMemo(
-    () => `/data-connectors?workspaceId=${encodeURIComponent(workspaceId)}`,
-    [workspaceId]
-  );
-
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await apiFetch<DataConnector[]>("/data-connectors", {
-        query: { workspaceId },
-      });
-      setItems(data);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId]);
-
-  function onTypeChange(next: DataConnectorType) {
-    setType(next);
-    setConfigJson(JSON.stringify(defaultConfigFor(next), null, 2));
-  }
-
-  async function testConnection() {
-    setError(null);
-    try {
-      const config = JSON.parse(configJson || "{}");
-      await apiFetch<{ ok: true }>("/data-connectors/test-connection", {
-        method: "POST",
-        body: JSON.stringify({ type, config }),
-      });
-      setError("✅ Connection ok");
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    }
-  }
-
-  async function createConnector() {
-    setError(null);
-    try {
-      const config = JSON.parse(configJson || "{}");
-      await apiFetch<DataConnector>("/data-connectors", {
-        method: "POST",
-        body: JSON.stringify({ workspaceId, type, name, config }),
-      });
-      setName("");
-      await load();
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    }
-  }
+  const style = styles[type as keyof typeof styles] || { class: 'badge-default', icon: '📁' };
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Data connectors</h1>
-          <p className="text-sm text-gray-600">
-            Workspace:{" "}
-            <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">
-              {workspaceId}
-            </span>
-          </p>
-          <p className="text-xs text-gray-500 mt-1">{listUrl}</p>
-        </div>
-        <a className="text-sm text-indigo-600 hover:underline" href={`/?workspaceId=${encodeURIComponent(workspaceId)}`}>
-          Back to dashboard
-        </a>
+    <span className={`badge ${style.class}`}>
+      <span className="mr-1">{style.icon}</span>
+      {type}
+    </span>
+  );
+}
+
+function StatusIndicator({ status, error }: { status: string; error?: string }) {
+  if (status === 'connected') {
+    return (
+      <div className="flex items-center gap-2 text-emerald-400">
+        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+        <span className="text-sm">Connected</span>
       </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 text-rose-400">
+      <div className="w-2 h-2 rounded-full bg-rose-400" />
+      <span className="text-sm" title={error}>Error</span>
+    </div>
+  );
+}
 
-      <div className="bg-white border rounded p-4">
-        <h2 className="font-semibold mb-3">Create data connector</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          <label className="text-sm md:col-span-2">
-            <div className="text-gray-600 mb-1">Name</div>
-            <input className="w-full border rounded px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <label className="text-sm">
-            <div className="text-gray-600 mb-1">Type</div>
-            <select className="w-full border rounded px-3 py-2" value={type} onChange={(e) => onTypeChange(e.target.value as DataConnectorType)}>
-              <option value="POSTGRES">POSTGRES</option>
-              <option value="BIGQUERY">BIGQUERY</option>
-            </select>
-          </label>
+const postgresConfig = {
+  connectionString: 'postgresql://user:password@host:5432/database',
+};
+
+const bigqueryConfig = {
+  projectId: 'your-project-id',
+  credentials: {
+    client_email: 'service-account@project.iam.gserviceaccount.com',
+    private_key: '-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----',
+  },
+};
+
+function CreateConnectorModal({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+}) {
+  const [type, setType] = useState<'POSTGRES' | 'BIGQUERY'>('POSTGRES');
+  const [config, setConfig] = useState(JSON.stringify(postgresConfig, null, 2));
+  const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  const handleTypeChange = (newType: 'POSTGRES' | 'BIGQUERY') => {
+    setType(newType);
+    setConfig(JSON.stringify(newType === 'POSTGRES' ? postgresConfig : bigqueryConfig, null, 2));
+    setTestResult(null);
+  };
+
+  const handleTest = () => {
+    setTesting(true);
+    setTimeout(() => {
+      setTestResult({ success: true });
+      setTesting(false);
+    }, 1500);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-2xl w-full max-w-2xl p-6 shadow-2xl animate-slide-up max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-semibold text-[var(--text-primary)]">Add Data Connector</h2>
+          <button onClick={onClose} className="btn btn-ghost p-2">
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        <label className="text-sm block mt-3">
-          <div className="text-gray-600 mb-1">Config (JSON)</div>
-          <textarea className="w-full border rounded px-3 py-2 font-mono text-xs h-44" value={configJson} onChange={(e) => setConfigJson(e.target.value)} />
-          <div className="text-xs text-gray-500 mt-1">Stored config is encrypted and never returned by the API.</div>
-        </label>
-
-        <div className="mt-3 flex gap-3">
-          <button className="px-4 py-2 rounded border text-sm" onClick={testConnection} disabled={!configJson}>
-            Test connection
-          </button>
-          <button className="px-4 py-2 rounded bg-indigo-600 text-white text-sm disabled:opacity-50" onClick={createConnector} disabled={!name || !configJson}>
-            Create
-          </button>
-          <button className="px-4 py-2 rounded border text-sm" onClick={load} disabled={loading}>
-            Refresh
-          </button>
-          <Link className="px-4 py-2 rounded border text-sm" href={`/segments?workspaceId=${encodeURIComponent(workspaceId)}`}>
-            Go to segments
-          </Link>
-        </div>
-        {error ? <div className="mt-3 text-sm text-red-600 whitespace-pre-wrap">{error}</div> : null}
-      </div>
-
-      <div className="bg-white border rounded">
-        <div className="px-4 py-3 border-b flex items-center justify-between">
-          <h2 className="font-semibold">All data connectors</h2>
-          <span className="text-xs text-gray-500">{loading ? "Loading…" : `${items.length} items`}</span>
-        </div>
-        <div className="divide-y">
-          {items.map((c) => (
-            <div key={c.id} className="px-4 py-3 flex items-center justify-between">
-              <div>
-                <div className="font-medium">
-                  <Link className="text-indigo-700 hover:underline" href={`/data-connectors/${c.id}?workspaceId=${encodeURIComponent(workspaceId)}`}>
-                    {c.name}
-                  </Link>
-                </div>
-                <div className="text-xs text-gray-600">{c.type}</div>
-              </div>
-              <div className="text-xs text-gray-500 font-mono">{c.id}</div>
+        <form className="space-y-5">
+          <div className="form-grid">
+            <div>
+              <label className="label">Name</label>
+              <input
+                type="text"
+                className="input"
+                placeholder="e.g., Production Database"
+              />
             </div>
-          ))}
-          {items.length === 0 && !loading ? (
-            <div className="px-4 py-10 text-sm text-gray-600">No data connectors yet.</div>
-          ) : null}
-        </div>
+            <div>
+              <label className="label">Type</label>
+              <select
+                className="select"
+                value={type}
+                onChange={(e) => handleTypeChange(e.target.value as 'POSTGRES' | 'BIGQUERY')}
+              >
+                <option value="POSTGRES">PostgreSQL</option>
+                <option value="BIGQUERY">BigQuery</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label mb-0">Configuration (JSON)</label>
+              <button
+                type="button"
+                onClick={handleTest}
+                disabled={testing}
+                className="btn btn-ghost text-sm py-1.5"
+              >
+                {testing ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plug className="w-4 h-4" />
+                )}
+                Test Connection
+              </button>
+            </div>
+            <textarea
+              className="textarea font-mono text-sm h-56"
+              value={config}
+              onChange={(e) => setConfig(e.target.value)}
+              spellCheck={false}
+            />
+            <p className="text-xs text-[var(--text-muted)] mt-2">
+              Configuration is encrypted at rest and never exposed via API
+            </p>
+          </div>
+
+          {testResult && (
+            <div className={`flex items-center gap-3 p-3 rounded-lg ${
+              testResult.success
+                ? 'bg-emerald-500/10 border border-emerald-500/20'
+                : 'bg-rose-500/10 border border-rose-500/20'
+            }`}>
+              {testResult.success ? (
+                <>
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                  <span className="text-emerald-400 font-medium">Connection successful</span>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="w-5 h-5 text-rose-400" />
+                  <span className="text-rose-400">{testResult.error}</span>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4">
+            <button type="button" onClick={onClose} className="btn btn-secondary">
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary">
+              Add Connector
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
 }
 
+export default function DataConnectorsPageClient() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const filteredConnectors = mockConnectors.filter(
+    (c) => c.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  if (isLoading) {
+    return (
+      <div className="animate-fade-in">
+        <div className="page-header">
+          <div className="skeleton" style={{ height: '32px', width: '192px', marginBottom: '8px' }} />
+          <div className="skeleton" style={{ height: '16px', width: '288px' }} />
+        </div>
+        <div className="cards-grid">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="skeleton" style={{ height: '192px', borderRadius: '16px' }} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-slide-up">
+      {/* Header */}
+      <div className="flex-between mb-lg">
+        <div>
+          <h1 className="page-title">Data Connectors</h1>
+          <p className="page-description">
+            Connect to your databases for SQL-based segmentation
+          </p>
+        </div>
+        <button onClick={() => setIsModalOpen(true)} className="btn btn-primary">
+          <Plus className="w-4 h-4" />
+          Add Connector
+        </button>
+      </div>
+
+      {/* Info Card */}
+      <div className="card-glow mb-8">
+        <div className="flex items-start gap-4">
+          <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+            <Server className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-medium text-[var(--text-primary)] mb-1">
+              Zero-ETL Architecture
+            </h3>
+            <p className="text-sm text-[var(--text-secondary)]">
+              Query your production or analytics databases directly. No data copying,
+              no sync jobs, no stale data. Your segments always reflect real-time state.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="search-container">
+        <Search className="search-icon" style={{ width: '20px', height: '20px' }} />
+        <input
+          type="text"
+          placeholder="Search connectors..."
+          className="search-input"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+      </div>
+
+      {/* Connectors Grid */}
+      {filteredConnectors.length > 0 ? (
+        <div className="cards-grid">
+          {filteredConnectors.map((connector) => (
+            <div key={connector.id} className="card-glow group">
+              <div className="flex items-start justify-between mb-4">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 flex items-center justify-center text-emerald-400">
+                  <Database className="w-6 h-6" />
+                </div>
+                <div className="relative">
+                  <button className="btn btn-ghost p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <MoreVertical className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <Link href={`/data-connectors/${connector.id}`} className="block mb-3">
+                <h3 className="text-lg font-semibold text-[var(--text-primary)] hover:text-indigo-400 transition-colors">
+                  {connector.name}
+                </h3>
+              </Link>
+
+              <div className="flex items-center gap-3 mb-4">
+                <ConnectorTypeBadge type={connector.type} />
+                <StatusIndicator status={connector.status} error={connector.error} />
+              </div>
+
+              <div className="flex items-center justify-between pt-4 border-t border-[var(--border-default)]">
+                <div className="text-sm text-[var(--text-muted)]">
+                  {connector.segmentsCount} segments
+                </div>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button className="btn btn-ghost p-2">
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                  <button className="btn btn-ghost p-2">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button className="btn btn-ghost p-2 text-rose-400">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="card">
+          <div className="empty-state">
+            <Database className="empty-state-icon" />
+            <h3 className="empty-state-title">No connectors found</h3>
+            <p className="empty-state-description">
+              {searchQuery
+                ? 'No connectors match your search'
+                : 'Add your first data connector to start querying'}
+            </p>
+            {!searchQuery && (
+              <button onClick={() => setIsModalOpen(true)} className="btn btn-primary">
+                <Plus className="w-4 h-4" />
+                Add Connector
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <CreateConnectorModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+    </div>
+  );
+}

@@ -11,16 +11,15 @@ import { SingleSendsModule } from "./single-sends/single-sends.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 import { TransactionalModule } from "./transactional/transactional.module";
 import { PrismaModule } from "./prisma/prisma.module";
-import { EventsModule } from "./events/events.module";
-import { JourneysModule } from "./journeys/journeys.module";
+import { CampaignGroupsModule } from "./campaign-groups/campaign-groups.module";
+import { ComponentsModule } from "./components/components.module";
+import { AnalyticsModule } from "./analytics/analytics.module";
 import { join } from "path";
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      // Turbo runs commands from `apps/api`, but the repo's `.env` commonly lives at the repo root.
-      // Load both, preferring the local one if present.
       envFilePath: [
         join(process.cwd(), ".env"),
         join(process.cwd(), "../../.env"),
@@ -32,16 +31,31 @@ import { join } from "path";
         port: parseInt(process.env.REDIS_PORT || "6379"),
       },
     }),
+
+    // Core
     HealthModule,
     PrismaModule,
-    EventsModule,
+
+    // Campaign Groups & Collision
+    CampaignGroupsModule,
+
+    // Connectors
     DataConnectorsModule,
     EmailConnectorsModule,
     SenderProfilesModule,
+
+    // Content
     TemplatesModule,
+    ComponentsModule,
     SegmentsModule,
+
+    // Campaigns
     SingleSendsModule,
-    JourneysModule,
+
+    // Analytics
+    AnalyticsModule,
+
+    // Webhooks & Transactional (scaffolded)
     WebhooksModule,
     TransactionalModule,
   ],

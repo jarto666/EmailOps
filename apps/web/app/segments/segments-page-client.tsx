@@ -1,219 +1,364 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { apiFetch } from "../lib/api";
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import {
+  Users,
+  Plus,
+  Database,
+  Code,
+  Play,
+  RefreshCw,
+  Search,
+  MoreVertical,
+  Edit2,
+  Trash2,
+  X,
+  CheckCircle2,
+  AlertCircle,
+} from 'lucide-react';
 
-type Connector = {
-  id: string;
-  name: string;
-  type: string;
-};
+// Mock data
+const mockConnectors = [
+  { id: '1', name: 'Production DB', type: 'POSTGRES' },
+  { id: '2', name: 'Analytics', type: 'BIGQUERY' },
+];
 
-type Segment = {
-  id: string;
-  name: string;
-  dataConnectorId: string;
-  sqlQuery: string;
-  dataConnector?: Connector;
-};
+const mockSegments = [
+  {
+    id: '1',
+    name: 'Active Users (30d)',
+    description: 'Users who logged in within the last 30 days',
+    dataConnectorId: '1',
+    dataConnector: { name: 'Production DB', type: 'POSTGRES' },
+    sqlQuery: `SELECT user_id as recipient_id, email, jsonb_build_object('name', first_name) as vars
+FROM users
+WHERE last_login_at > NOW() - INTERVAL '30 days'`,
+    lastRunCount: 45230,
+    lastRunAt: '2024-01-14T10:30:00Z',
+  },
+  {
+    id: '2',
+    name: 'Low Credit Users',
+    description: 'Users with credits below threshold',
+    dataConnectorId: '1',
+    dataConnector: { name: 'Production DB', type: 'POSTGRES' },
+    sqlQuery: `SELECT user_id as recipient_id, email, jsonb_build_object('credits', credits) as vars
+FROM users
+WHERE credits < 100`,
+    lastRunCount: 3420,
+    lastRunAt: '2024-01-13T14:20:00Z',
+  },
+  {
+    id: '3',
+    name: 'Premium Subscribers',
+    description: 'Active premium plan subscribers',
+    dataConnectorId: '2',
+    dataConnector: { name: 'Analytics', type: 'BIGQUERY' },
+    sqlQuery: `SELECT user_id as recipient_id, email, STRUCT(plan_name, renewal_date) as vars
+FROM subscriptions
+WHERE plan_type = 'premium' AND status = 'active'`,
+    lastRunCount: 12890,
+    lastRunAt: '2024-01-14T08:00:00Z',
+  },
+];
 
-export default function SegmentsPageClient({
-  workspaceId,
+const defaultSqlQuery = `SELECT
+  user_id::text AS recipient_id,
+  email::text AS email,
+  jsonb_build_object(
+    'user', jsonb_build_object('firstName', first_name)
+  ) AS vars
+FROM users
+WHERE created_at > NOW() - INTERVAL '7 days'`;
+
+function CreateSegmentModal({
+  isOpen,
+  onClose,
+  connectors,
 }: {
-  workspaceId: string;
+  isOpen: boolean;
+  onClose: () => void;
+  connectors: typeof mockConnectors;
 }) {
-  const [items, setItems] = useState<Segment[]>([]);
-  const [connectors, setConnectors] = useState<Connector[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [sqlQuery, setSqlQuery] = useState(defaultSqlQuery);
+  const [testResult, setTestResult] = useState<{ success: boolean; count?: number; error?: string } | null>(null);
 
-  const [name, setName] = useState("");
-  const [dataConnectorId, setDataConnectorId] = useState("");
-  const [sqlQuery, setSqlQuery] = useState(
-    `select\n  'user_1'::text as recipient_id,\n  'user1@example.com'::text as email,\n  jsonb_build_object('user', jsonb_build_object('firstName','Ava')) as vars`
-  );
+  if (!isOpen) return null;
 
-  const listUrl = useMemo(
-    () => `/segments?workspaceId=${encodeURIComponent(workspaceId)}`,
-    [workspaceId]
-  );
-
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const [segmentsData, connectorsData] = await Promise.all([
-        apiFetch<Segment[]>("/segments", { query: { workspaceId } }),
-        apiFetch<Connector[]>("/data-connectors", { query: { workspaceId } }),
-      ]);
-      setItems(segmentsData);
-      setConnectors(connectorsData);
-      if (!dataConnectorId && connectorsData[0]?.id)
-        setDataConnectorId(connectorsData[0].id);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId]);
-
-  async function createSegment() {
-    setError(null);
-    try {
-      await apiFetch<Segment>("/segments", {
-        method: "POST",
-        body: JSON.stringify({ workspaceId, name, dataConnectorId, sqlQuery }),
-      });
-      setName("");
-      await load();
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    }
-  }
+  const handleTest = () => {
+    // Simulate test
+    setTestResult({ success: true, count: 1542 });
+  };
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Segments</h1>
-          <p className="text-sm text-gray-600">
-            Workspace:{" "}
-            <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">
-              {workspaceId}
-            </span>{" "}
-            <span className="text-gray-400">(change via URL)</span>
-          </p>
-          <p className="text-xs text-gray-500 mt-1">{listUrl}</p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-2xl w-full max-w-3xl p-6 shadow-2xl animate-slide-up max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-semibold text-[var(--text-primary)]">Create Segment</h2>
+          <button onClick={onClose} className="btn btn-ghost p-2">
+            <X className="w-5 h-5" />
+          </button>
         </div>
-        <a
-          className="text-sm text-indigo-600 hover:underline"
-          href={`/?workspaceId=${encodeURIComponent(workspaceId)}`}
-        >
-          Back to dashboard
-        </a>
-      </div>
 
-      <div className="bg-white border rounded p-4">
-        <h2 className="font-semibold mb-3">Create segment</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          <label className="text-sm md:col-span-2">
-            <div className="text-gray-600 mb-1">Name</div>
-            <input
-              className="w-full border rounded px-3 py-2"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Active users (last 30 days)"
-            />
-          </label>
-          <label className="text-sm">
-            <div className="text-gray-600 mb-1">Connector</div>
-            {connectors.length > 0 ? (
-              <select
-                className="w-full border rounded px-3 py-2"
-                value={dataConnectorId}
-                onChange={(e) => setDataConnectorId(e.target.value)}
-              >
+        <form className="space-y-5">
+          <div className="form-grid">
+            <div>
+              <label className="label">Name</label>
+              <input
+                type="text"
+                className="input"
+                placeholder="e.g., Active Users (30d)"
+              />
+            </div>
+            <div>
+              <label className="label">Data Connector</label>
+              <select className="select">
                 {connectors.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name} ({c.type})
                   </option>
                 ))}
               </select>
-            ) : (
-              <input
-                className="w-full border rounded px-3 py-2 font-mono text-xs"
-                value={dataConnectorId}
-                onChange={(e) => setDataConnectorId(e.target.value)}
-                placeholder="dataConnectorId (no connectors found)"
-              />
-            )}
-          </label>
-        </div>
-        <label className="text-sm block mt-3">
-          <div className="text-gray-600 mb-1">SQL query</div>
-          <textarea
-            className="w-full border rounded px-3 py-2 font-mono text-xs h-44"
-            value={sqlQuery}
-            onChange={(e) => setSqlQuery(e.target.value)}
-          />
-          <div className="text-xs text-gray-500 mt-1">
-            Must be a single SELECT/WITH statement. Recommended columns:{" "}
-            <span className="font-mono">recipient_id</span>,{" "}
-            <span className="font-mono">email</span>,{" "}
-            <span className="font-mono">vars</span>.
+            </div>
           </div>
-        </label>
-        <div className="mt-3 flex gap-3">
-          <button
-            className="px-4 py-2 rounded bg-indigo-600 text-white text-sm disabled:opacity-50"
-            onClick={createSegment}
-            disabled={!name || !dataConnectorId || !sqlQuery}
-          >
-            Create
-          </button>
-          <button
-            className="px-4 py-2 rounded border text-sm"
-            onClick={load}
-            disabled={loading}
-          >
-            Refresh
-          </button>
-        </div>
-        {error ? (
-          <div className="mt-3 text-sm text-red-600 whitespace-pre-wrap">
-            {error}
-          </div>
-        ) : null}
-      </div>
 
-      <div className="bg-white border rounded">
-        <div className="px-4 py-3 border-b flex items-center justify-between">
-          <h2 className="font-semibold">All segments</h2>
-          <span className="text-xs text-gray-500">
-            {loading ? "Loading…" : `${items.length} items`}
-          </span>
-        </div>
-        <div className="divide-y">
-          {items.map((s) => (
-            <div
-              key={s.id}
-              className="px-4 py-3 flex items-center justify-between"
-            >
-              <div>
-                <div className="font-medium">
-                  <Link
-                    className="text-indigo-700 hover:underline"
-                    href={`/segments/${s.id}?workspaceId=${encodeURIComponent(
-                      workspaceId
-                    )}`}
-                  >
-                    {s.name}
-                  </Link>
-                </div>
-                <div className="text-xs text-gray-600">
-                  Connector:{" "}
-                  <span className="font-mono">
-                    {s.dataConnector?.name ?? s.dataConnectorId}
-                  </span>
-                </div>
+          <div>
+            <label className="label">Description</label>
+            <input
+              type="text"
+              className="input"
+              placeholder="Brief description of this segment"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label mb-0">SQL Query</label>
+              <button type="button" onClick={handleTest} className="btn btn-ghost text-sm py-1.5">
+                <Play className="w-4 h-4" />
+                Test Query
+              </button>
+            </div>
+            <div className="relative">
+              <textarea
+                className="textarea font-mono text-sm h-56"
+                value={sqlQuery}
+                onChange={(e) => setSqlQuery(e.target.value)}
+                spellCheck={false}
+              />
+              <div className="absolute bottom-3 left-3 flex items-center gap-2">
+                <Code className="w-4 h-4 text-[var(--text-muted)]" />
+                <span className="text-xs text-[var(--text-muted)]">SQL</span>
               </div>
-              <div className="text-xs text-gray-500 font-mono">{s.id}</div>
             </div>
-          ))}
-          {items.length === 0 && !loading ? (
-            <div className="px-4 py-10 text-sm text-gray-600">
-              No segments yet.
+            <div className="mt-2 text-xs text-[var(--text-muted)]">
+              Required columns: <code className="text-indigo-400">recipient_id</code>, <code className="text-indigo-400">email</code>.
+              Optional: <code className="text-indigo-400">vars</code> (JSONB for template variables)
             </div>
-          ) : null}
-        </div>
+          </div>
+
+          {testResult && (
+            <div className={`flex items-center gap-3 p-3 rounded-lg ${
+              testResult.success
+                ? 'bg-emerald-500/10 border border-emerald-500/20'
+                : 'bg-rose-500/10 border border-rose-500/20'
+            }`}>
+              {testResult.success ? (
+                <>
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                  <div>
+                    <span className="text-emerald-400 font-medium">Query successful</span>
+                    <span className="text-[var(--text-secondary)] ml-2">
+                      {testResult.count?.toLocaleString()} recipients found
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="w-5 h-5 text-rose-400" />
+                  <span className="text-rose-400">{testResult.error}</span>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4">
+            <button type="button" onClick={onClose} className="btn btn-secondary">
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary">
+              Create Segment
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
 }
 
+export default function SegmentsPageClient() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const filteredSegments = mockSegments.filter(
+    (s) =>
+      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  if (isLoading) {
+    return (
+      <div className="animate-fade-in">
+        <div className="page-header">
+          <div className="skeleton" style={{ height: '32px', width: '192px', marginBottom: '8px' }} />
+          <div className="skeleton" style={{ height: '16px', width: '288px' }} />
+        </div>
+        <div className="skeleton" style={{ height: '256px', borderRadius: '16px' }} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-slide-up">
+      {/* Header */}
+      <div className="flex-between mb-lg">
+        <div>
+          <h1 className="page-title">Segments</h1>
+          <p className="page-description">
+            Define audiences with SQL queries for targeted campaigns
+          </p>
+        </div>
+        <button onClick={() => setIsModalOpen(true)} className="btn btn-primary">
+          <Plus className="w-4 h-4" />
+          New Segment
+        </button>
+      </div>
+
+      {/* Info Card */}
+      <div className="card-glow mb-8">
+        <div className="flex items-start gap-4">
+          <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400">
+            <Code className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-medium text-[var(--text-primary)] mb-1">
+              SQL-First Segmentation
+            </h3>
+            <p className="text-sm text-[var(--text-secondary)]">
+              Write SQL queries directly against your data sources. Your query must return{' '}
+              <code className="text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded">recipient_id</code> and{' '}
+              <code className="text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded">email</code> columns.
+              Add <code className="text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded">vars</code> for template personalization.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="search-container">
+        <Search className="search-icon" style={{ width: '20px', height: '20px' }} />
+        <input
+          type="text"
+          placeholder="Search segments..."
+          className="search-input"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+      </div>
+
+      {/* Segments List */}
+      {filteredSegments.length > 0 ? (
+        <div className="list-container">
+          {filteredSegments.map((segment) => (
+            <div key={segment.id} className="card-glow group">
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-4 flex-1">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center text-purple-400">
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <Link
+                      href={`/segments/${segment.id}`}
+                      className="text-lg font-semibold text-[var(--text-primary)] hover:text-indigo-400 transition-colors"
+                    >
+                      {segment.name}
+                    </Link>
+                    {segment.description && (
+                      <p className="text-sm text-[var(--text-secondary)] mt-0.5">
+                        {segment.description}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-4 mt-3">
+                      <span className="badge badge-default">
+                        <Database className="w-3 h-3 mr-1" />
+                        {segment.dataConnector?.name}
+                      </span>
+                      <span className="text-sm text-[var(--text-muted)]">
+                        {segment.lastRunCount?.toLocaleString()} recipients
+                      </span>
+                      {segment.lastRunAt && (
+                        <span className="text-sm text-[var(--text-muted)]">
+                          Last run: {new Date(segment.lastRunAt).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button className="btn btn-ghost p-2">
+                    <Play className="w-4 h-4" />
+                  </button>
+                  <button className="btn btn-ghost p-2">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button className="btn btn-ghost p-2 text-rose-400">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* SQL Preview */}
+              <div className="mt-4 bg-[var(--bg-tertiary)] rounded-lg p-4 overflow-x-auto">
+                <pre className="text-xs text-[var(--text-secondary)] font-mono whitespace-pre-wrap">
+                  {segment.sqlQuery}
+                </pre>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="card">
+          <div className="empty-state">
+            <Users className="empty-state-icon" />
+            <h3 className="empty-state-title">No segments found</h3>
+            <p className="empty-state-description">
+              {searchQuery
+                ? 'No segments match your search'
+                : 'Create your first segment to define your audience'}
+            </p>
+            {!searchQuery && (
+              <button onClick={() => setIsModalOpen(true)} className="btn btn-primary">
+                <Plus className="w-4 h-4" />
+                Create Segment
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <CreateSegmentModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        connectors={mockConnectors}
+      />
+    </div>
+  );
+}
