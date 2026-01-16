@@ -1,10 +1,11 @@
 # EmailOps Starter Kit (Self-Hosted) — Detailed MVP Specification
 
-Version: 0.2 (updated: Templates = Raw + Builder)  
-Author: (you)  
-Target: Engineering + Product + Marketing stakeholders  
-Primary Goal: Provide a self-hosted “Email Operations” platform that enables non-engineers (PMs/Marketers) to create, preview, and run lifecycle/marketing email campaigns driven by SQL segments, while engineers configure connectors and integrate transactional emails from code.  
+Version: 1.0 (Updated January 2026)
+Target: Engineering + Product + Marketing stakeholders
+Primary Goal: Provide a self-hosted "Email Operations" platform that enables non-engineers (PMs/Marketers) to create, preview, and run lifecycle/marketing email campaigns driven by SQL segments, while engineers configure connectors and integrate transactional emails from code.
 Non-Goal: Replace an ESP end-to-end (no contact CRM, no omnichannel, no full marketing automation suite).
+
+> **Note**: This document describes the product specification and requirements. For implementation status, see [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md).
 
 ---
 

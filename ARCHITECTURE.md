@@ -1,7 +1,7 @@
 # EmailOps Architecture
 
-> Version: 1.0
-> Last Updated: January 2025
+> Version: 2.0
+> Last Updated: January 2026
 
 ## System Overview
 
@@ -79,33 +79,35 @@ EmailOps is a **SQL-first email orchestration platform** designed for data-matur
 
 ## Component Architecture
 
-### Frontend (Next.js 16)
+### Frontend (Next.js 15)
 
 ```
 apps/web/
 ├── app/
-│   ├── layout.tsx              # Root layout with navigation
-│   ├── page.tsx                # Dashboard
-│   ├── (auth)/                 # Authentication pages
-│   ├── campaigns/              # Campaign management
-│   │   ├── page.tsx            # List view
-│   │   ├── [id]/               # Detail/edit view
-│   │   └── new/                # Create flow
-│   ├── campaign-groups/        # Campaign group management
-│   ├── segments/               # SQL segment editor
-│   ├── templates/              # Template authoring
-│   ├── components/             # Component library management
-│   ├── connectors/             # Data & email connector setup
-│   └── settings/               # System settings
+│   ├── layout.tsx              # Root layout with sidebar navigation
+│   ├── page.tsx                # Dashboard (analytics overview)
+│   ├── campaign-groups/        # Collision group management
+│   ├── campaigns/[id]/         # Campaign detail view
+│   ├── campaigns/              # Campaign list (alias for single-sends)
+│   ├── single-sends/[id]/      # Single send detail
+│   ├── single-sends/           # Single send list
+│   ├── segments/[id]/          # Segment detail with SQL editor
+│   ├── segments/               # Segment list
+│   ├── templates/[id]/         # Template detail with versioning
+│   ├── templates/              # Template list
+│   ├── email-components/       # Component library gallery
+│   ├── data-connectors/[id]/   # Data connector detail
+│   ├── data-connectors/        # Data connector list
+│   ├── email-connectors/[id]/  # Email connector detail
+│   ├── email-connectors/       # Email connector list
+│   ├── sender-profiles/[id]/   # Sender profile detail
+│   ├── sender-profiles/        # Sender profile list
+│   ├── journeys/               # Journey automation (stub)
+│   └── settings/               # Workspace settings
 ├── components/
-│   ├── ui/                     # Design system components
-│   ├── charts/                 # Analytics visualizations
-│   ├── editors/                # Code editors (SQL, MJML)
-│   └── forms/                  # Form components
+│   └── ui/                     # Shared UI components
 └── lib/
-    ├── api.ts                  # API client
-    ├── hooks/                  # React hooks
-    └── utils/                  # Utilities
+    └── api.ts                  # API client utilities
 ```
 
 **Technology Choices**:
@@ -113,19 +115,53 @@ apps/web/
 - Tailwind CSS 4 for styling
 - Radix UI primitives for accessibility
 - Recharts for analytics visualization
-- Monaco Editor for code editing
 
 ### Backend API (NestJS 11)
 
 ```
 apps/api/
 ├── src/
-│   ├── main.ts                 # Application entry
+│   ├── main.ts                 # Application entry (Port 3300)
 │   ├── app.module.ts           # Root module
 │   │
-│   ├── campaign-groups/        # Campaign group management
+│   ├── analytics/              # Dashboard & reporting
+│   │   ├── analytics.controller.ts
+│   │   └── analytics.service.ts
+│   │
+│   ├── campaign-groups/        # Collision group management
 │   │   ├── campaign-groups.controller.ts
 │   │   ├── campaign-groups.service.ts
+│   │   └── dto/
+│   │
+│   ├── components/             # Reusable email blocks
+│   │   ├── components.controller.ts
+│   │   ├── components.service.ts
+│   │   └── dto/
+│   │
+│   ├── data-connectors/        # Postgres/BigQuery connections
+│   │   ├── data-connectors.controller.ts
+│   │   ├── data-connectors.service.ts
+│   │   └── dto/
+│   │
+│   ├── email-connectors/       # SES/Resend/SMTP providers
+│   │   ├── email-connectors.controller.ts
+│   │   ├── email-connectors.service.ts
+│   │   └── dto/
+│   │
+│   ├── health/                 # Health check endpoint
+│   │   └── health.controller.ts
+│   │
+│   ├── prisma/                 # Database service
+│   │   └── prisma.service.ts
+│   │
+│   ├── segments/               # SQL-based audiences
+│   │   ├── segments.controller.ts
+│   │   ├── segments.service.ts
+│   │   └── dto/
+│   │
+│   ├── sender-profiles/        # From addresses
+│   │   ├── sender-profiles.controller.ts
+│   │   ├── sender-profiles.service.ts
 │   │   └── dto/
 │   │
 │   ├── single-sends/           # Campaign orchestration
@@ -134,31 +170,27 @@ apps/api/
 │   │   ├── collision.service.ts    # Collision detection
 │   │   └── dto/
 │   │
-│   ├── segments/               # Audience definition
-│   │   ├── segments.controller.ts
-│   │   ├── segments.service.ts
-│   │   └── query-governor.ts   # SQL safety layer
-│   │
 │   ├── templates/              # Template management
 │   │   ├── templates.controller.ts
 │   │   ├── templates.service.ts
-│   │   └── rendering.service.ts
+│   │   ├── template-versions.controller.ts
+│   │   ├── template-versions.service.ts
+│   │   ├── rendering.service.ts    # MJML/HTML compilation
+│   │   └── dto/
 │   │
-│   ├── component-library/      # Reusable components
-│   │   ├── components.controller.ts
-│   │   └── components.service.ts
+│   ├── common/                 # Shared utilities
+│   │   └── encryption/
 │   │
-│   ├── connectors/             # Data connectors
-│   │   ├── data-connectors/
-│   │   └── email-connectors/
-│   │
-│   ├── analytics/              # Delivery analytics
-│   │   └── analytics.service.ts
-│   │
-│   └── common/                 # Shared utilities
-│       ├── prisma/
-│       ├── encryption/
-│       └── guards/
+│   ├── transactional/          # Transactional API (scaffolded)
+│   └── webhooks/               # ESP webhooks (scaffolded)
+│
+└── test/
+    ├── integration/            # Integration tests
+    │   ├── templates.spec.ts
+    │   └── single-sends.spec.ts
+    └── utils/                  # Test utilities
+        ├── test-database.ts    # Testcontainers
+        └── test-fixtures.ts    # Data factory
 ```
 
 ### Background Worker (NestJS + BullMQ)
@@ -702,7 +734,7 @@ GET    /api/analytics/delivery-timeline
 
 | Layer | Technology | Version |
 |-------|------------|---------|
-| Frontend | Next.js | 16.x |
+| Frontend | Next.js | 15.x |
 | Frontend | React | 19.x |
 | Frontend | Tailwind CSS | 4.x |
 | Backend | NestJS | 11.x |
@@ -713,5 +745,6 @@ GET    /api/analytics/delivery-timeline
 | Email | AWS SES v2 | - |
 | Email | MJML | 4.x |
 | Templating | Handlebars | 4.x |
+| Testing | Jest + Testcontainers | 29.x |
 | Package Manager | pnpm | 9.x |
-| Build | Turbo | 2.x |
+| Monorepo | Turborepo | 2.x |

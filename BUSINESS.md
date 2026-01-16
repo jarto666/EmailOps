@@ -1,6 +1,7 @@
 # EmailOps Business Overview
 
 > A SQL-first email orchestration platform for data-mature companies
+> Updated: January 2026
 
 ---
 
@@ -300,34 +301,40 @@ EmailOps is **the SQL-first email orchestration layer** that connects directly t
 
 ## Roadmap
 
-### MVP (Current)
+### MVP ✅ COMPLETE (January 2026)
 - [x] Core infrastructure (Prisma, Redis, BullMQ)
 - [x] Data connectors (Postgres, BigQuery)
-- [x] Email connectors (SES)
-- [x] Template system (HTML, MJML)
+- [x] Email connectors (SES, Resend, SMTP)
+- [x] Template system (HTML, MJML, versioning)
 - [x] Segment editor with SQL validation
-- [x] Single sends with scheduling
-- [ ] Campaign groups with collision engine
-- [ ] Component library
-- [ ] Modern UI redesign
+- [x] Single sends with scheduling (manual, cron)
+- [x] Campaign groups with collision engine
+- [x] Component library (headers, footers, buttons)
+- [x] Modern UI (dark theme, dashboard)
+- [x] Analytics dashboard
 
-### V1.1 (Post-MVP)
-- [ ] Webhook analytics (bounces, complaints, deliveries)
-- [ ] Advanced rate limiting policies
+### V1.0 (In Progress)
+- [x] Integration test infrastructure
+- [ ] Complete worker processors (single-send, segment, send)
+- [ ] End-to-end campaign execution flow
+- [ ] Webhook event handling (delivery, bounce, complaint)
+
+### V1.1 (Planned)
+- [ ] Transactional email API
 - [ ] Template preview with sample data
 - [ ] Segment audience export (CSV)
+- [ ] Rate limiting per sender profile
 
-### V1.2
+### V1.2 (Planned)
 - [ ] Journey automation (multi-step sequences)
 - [ ] Event ingestion API
-- [ ] Transactional email API
 - [ ] A/B testing
 
-### V2.0
+### V2.0 (Future)
 - [ ] UI Builder (drag-and-drop)
 - [ ] Audience sync to ad platforms
 - [ ] Multi-language templates
-- [ ] Advanced analytics dashboard
+- [ ] Advanced analytics and reporting
 
 ---
 

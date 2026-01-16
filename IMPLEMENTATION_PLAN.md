@@ -1,494 +1,432 @@
 # Implementation Plan: EmailOps
 
-> Version 2.0 — Refactored with Collision Engine, Component Library, and Modern UI
+> Version 3.0 — Updated January 2026
 > See also: [ARCHITECTURE.md](./ARCHITECTURE.md) | [BUSINESS.md](./BUSINESS.md) | [SPEC.md](./SPEC.md)
 
 ---
 
 ## Overview
 
-This plan implements a **SQL-first email orchestration platform** with these key differentiators:
+EmailOps is a **SQL-first email orchestration platform** with these key differentiators:
 
 1. **Zero-ETL**: Direct database queries, no sync required
 2. **Collision Engine**: Priority-based deduplication across campaign groups
 3. **Component Library**: Reusable email building blocks
-4. **Modern UI**: Dark theme, beautiful design, "wow effect"
+4. **Modern UI**: Dark theme with Tailwind CSS
 
 ---
 
-## Phase 1: Foundation & Schema (Backend)
+## Current Status Summary
 
-### 1.1 Database Schema Updates
+| Phase | Status | Completion |
+|-------|--------|------------|
+| Phase 1: Database Schema | ✅ Complete | 100% |
+| Phase 2: API Layer | ✅ Complete | 100% |
+| Phase 3: Web UI | ✅ Complete | 100% |
+| Phase 4: Worker Processors | 🟡 In Progress | 60% |
+| Phase 5: End-to-End Flow | 🔴 Pending | 20% |
+| Phase 6: Testing & Polish | 🟡 In Progress | 40% |
+
+---
+
+## Phase 1: Database Schema ✅ COMPLETE
+
+### 1.1 Core Models
 
 **File**: `packages/core/prisma/schema.prisma`
 
-- [x] Core entities (Workspace, Template, Segment, SingleSend, etc.)
-- [ ] **NEW**: Add `CampaignGroup` model
-  ```prisma
-  model CampaignGroup {
-    id               String          @id @default(cuid())
-    name             String
-    description      String?
-    collisionWindow  Int             @default(86400)  // seconds
-    collisionPolicy  CollisionPolicy @default(HIGHEST_PRIORITY_WINS)
-    createdAt        DateTime        @default(now())
-    updatedAt        DateTime        @updatedAt
-    singleSends      SingleSend[]
-    sendLogs         SendLog[]
-  }
+- [x] `Workspace` — Tenant container
+- [x] `DataConnector` — Postgres/BigQuery connections
+- [x] `EmailProviderConnector` — SES/Resend/SMTP providers
+- [x] `SenderProfile` — From addresses
+- [x] `Template` — Email template master
+- [x] `TemplateVersion` — Immutable versions (HTML, MJML, UI Builder)
+- [x] `Component` — Reusable email blocks (HEADER, FOOTER, BUTTON, etc.)
+- [x] `Segment` — SQL-based audience definitions
+- [x] `CampaignGroup` — Collision management groups
+- [x] `SingleSend` — Campaign/broadcast entity
+- [x] `SingleSendRun` — Campaign execution instance
+- [x] `SingleSendRecipient` — Recipients per run
+- [x] `Send` — Individual email delivery record
+- [x] `SendLog` — Collision detection log
+- [x] `Suppression` — Bounces/complaints/unsubscribes
+- [x] `Preference` — Category-level opt-in
+- [x] `DailyStats` — Analytics aggregates
+- [x] `DeadLetter` — Failed job records
 
-  enum CollisionPolicy {
-    HIGHEST_PRIORITY_WINS
-    FIRST_QUEUED_WINS
-    SEND_ALL
-  }
-  ```
+### 1.2 Enums
 
-- [ ] **NEW**: Add `SendLog` model for collision tracking
-  ```prisma
-  model SendLog {
-    id              String        @id @default(cuid())
-    subjectId       String
-    campaignGroupId String
-    campaignGroup   CampaignGroup @relation(...)
-    singleSendId    String
-    singleSend      SingleSend    @relation(...)
-    sentAt          DateTime      @default(now())
-
-    @@index([subjectId, campaignGroupId, sentAt])
-  }
-  ```
-
-- [ ] **NEW**: Add `Component` model for component library
-  ```prisma
-  model Component {
-    id          String        @id @default(cuid())
-    name        String        @unique
-    description String?
-    type        ComponentType
-    contentType ContentType   @default(MJML)
-    content     String
-    variables   Json          @default("[]")
-    previewHtml String?
-    createdAt   DateTime      @default(now())
-    updatedAt   DateTime      @updatedAt
-  }
-
-  enum ComponentType {
-    HEADER
-    FOOTER
-    BUTTON
-    CARD
-    DIVIDER
-    SNIPPET
-  }
-
-  enum ContentType {
-    MJML
-    HTML
-  }
-  ```
-
-- [ ] **MODIFY**: Update `SingleSend` with campaign group and priority
-  ```prisma
-  model SingleSend {
-    // ... existing fields
-    campaignGroupId  String?
-    campaignGroup    CampaignGroup? @relation(...)
-    priority         Int            @default(100)
-    sendLogs         SendLog[]
-  }
-  ```
-
-- [ ] **REMOVE**: Multi-workspace complexity (commit to single-tenant)
-
-### 1.2 Shared Services
-
-**File**: `packages/core/src/`
-
-- [x] `EncryptionService` — AES-256-CBC for credentials
-- [x] `Logger` — Structured logging
-- [ ] **NEW**: `CollisionService` — Collision detection logic
+- [x] `SingleSendStatus` — DRAFT, ACTIVE, PAUSED, ARCHIVED, COMPLETED
+- [x] `ScheduleType` — MANUAL, CRON
+- [x] `SingleSendRunStatus` — CREATED, AUDIENCE_BUILDING, AUDIENCE_READY, SENDING, COMPLETED, FAILED
+- [x] `CollisionPolicy` — HIGHEST_PRIORITY_WINS, FIRST_QUEUED_WINS, SEND_ALL
+- [x] `AuthoringMode` — RAW_HTML, RAW_MJML, UI_BUILDER
+- [x] `ComponentType` — HEADER, FOOTER, BUTTON, CARD, DIVIDER, SNIPPET
+- [x] `SuppressionReason` — BOUNCE, COMPLAINT, UNSUBSCRIBE, MANUAL
 
 ---
 
-## Phase 2: Campaign Groups & Collision Engine
+## Phase 2: API Layer ✅ COMPLETE
 
-### 2.1 Campaign Groups API
+### 2.1 Health & Infrastructure
 
-**Files**: `apps/api/src/campaign-groups/`
+**File**: `apps/api/src/health/`
+- [x] `GET /health` — Health check endpoint
 
-- [ ] `campaign-groups.controller.ts`
-  - `POST /api/campaign-groups` — Create group
-  - `GET /api/campaign-groups` — List groups
-  - `GET /api/campaign-groups/:id` — Get group with stats
-  - `PATCH /api/campaign-groups/:id` — Update group
-  - `DELETE /api/campaign-groups/:id` — Delete group
+**File**: `apps/api/src/prisma/`
+- [x] `PrismaService` — Database client with Prisma adapter
 
-- [ ] `campaign-groups.service.ts`
-  - CRUD operations
-  - Validation (unique name)
-  - Stats aggregation (campaigns count, total sends)
+### 2.2 Data Connectors
 
-- [ ] DTOs
-  - `create-campaign-group.dto.ts`
-  - `update-campaign-group.dto.ts`
+**File**: `apps/api/src/data-connectors/`
+- [x] `POST /data-connectors` — Create connector
+- [x] `GET /data-connectors` — List connectors
+- [x] `GET /data-connectors/:id` — Get connector
+- [x] `PATCH /data-connectors/:id` — Update connector
+- [x] `DELETE /data-connectors/:id` — Delete connector
+- [x] `POST /data-connectors/test-connection` — Test connection
 
-### 2.2 Collision Engine Implementation
+### 2.3 Email Connectors
 
-**File**: `apps/api/src/single-sends/collision.service.ts`
+**File**: `apps/api/src/email-connectors/`
+- [x] `POST /email-connectors` — Create connector
+- [x] `GET /email-connectors` — List connectors
+- [x] `GET /email-connectors/:id` — Get connector
+- [x] `PATCH /email-connectors/:id` — Update connector
+- [x] `DELETE /email-connectors/:id` — Delete connector
+- [x] `POST /email-connectors/test-connection` — Test connection
 
-- [ ] `checkCollision(subjectId, campaignGroupId, windowSeconds)`
-  - Query SendLog for recent sends
-  - Return collision status and reason
+### 2.4 Sender Profiles
 
-- [ ] `checkPriorityCollision(subjectId, campaignGroupId, priority)`
-  - Check if user is queued for higher-priority campaign
-  - Return collision status
+**File**: `apps/api/src/sender-profiles/`
+- [x] `POST /sender-profiles` — Create profile
+- [x] `GET /sender-profiles` — List profiles
+- [x] `GET /sender-profiles/:id` — Get profile
+- [x] `PATCH /sender-profiles/:id` — Update profile
+- [x] `DELETE /sender-profiles/:id` — Delete profile
 
-**File**: `apps/worker/src/processors/segment.processor.ts`
+### 2.5 Templates
 
-- [ ] **MODIFY**: `buildAudienceSnapshot()`
-  - After fetching recipients, apply collision filters
-  - Track skip reasons: `collision:already_sent`, `collision:lower_priority`
-  - Batch collision checks for performance
+**File**: `apps/api/src/templates/`
+- [x] `POST /templates` — Create template
+- [x] `GET /templates` — List templates
+- [x] `GET /templates/:id` — Get template with versions
+- [x] `PATCH /templates/:id` — Update template
+- [x] `DELETE /templates/:id` — Delete template
 
-**File**: `apps/worker/src/processors/send.processor.ts`
+**File**: `apps/api/src/templates/template-versions.service.ts`
+- [x] `POST /templates/:id/versions` — Create version
+- [x] `GET /templates/:id/versions` — List versions
+- [x] `GET /templates/:id/versions/:versionId` — Get version
+- [x] `PATCH /templates/:id/versions/:versionId` — Update version
+- [x] `POST /templates/:id/versions/:versionId/publish` — Publish version
+- [x] `POST /templates/:id/versions/:versionId/render` — Render with variables
 
-- [ ] **MODIFY**: `sendEmail()`
-  - Add send-time collision check (belt-and-suspenders)
-  - Insert into SendLog after successful send
-  - Update skip reason if collision detected
+### 2.6 Components
 
-### 2.3 Update Single Sends
+**File**: `apps/api/src/components/`
+- [x] `POST /components` — Create component
+- [x] `GET /components` — List components (with type filter)
+- [x] `GET /components/:id` — Get component
+- [x] `PATCH /components/:id` — Update component
+- [x] `DELETE /components/:id` — Delete component
+- [x] `POST /components/:id/preview` — Preview with variables
+
+### 2.7 Segments
+
+**File**: `apps/api/src/segments/`
+- [x] `POST /segments` — Create segment
+- [x] `GET /segments` — List segments
+- [x] `GET /segments/:id` — Get segment
+- [x] `PATCH /segments/:id` — Update segment
+- [x] `DELETE /segments/:id` — Delete segment
+- [x] `POST /segments/:id/dry-run` — Test query with sample
+
+### 2.8 Campaign Groups
+
+**File**: `apps/api/src/campaign-groups/`
+- [x] `POST /campaign-groups` — Create group
+- [x] `GET /campaign-groups` — List groups
+- [x] `GET /campaign-groups/:id` — Get group
+- [x] `PATCH /campaign-groups/:id` — Update group
+- [x] `DELETE /campaign-groups/:id` — Delete group
+- [x] `GET /campaign-groups/:id/stats` — Get collision stats
+
+### 2.9 Single Sends (Campaigns)
 
 **File**: `apps/api/src/single-sends/`
+- [x] `POST /single-sends` — Create campaign
+- [x] `GET /single-sends` — List campaigns
+- [x] `GET /single-sends/:id` — Get campaign with runs
+- [x] `PATCH /single-sends/:id` — Update campaign
+- [x] `DELETE /single-sends/:id` — Delete campaign
+- [x] `POST /single-sends/:id/trigger` — Trigger campaign
 
-- [ ] **MODIFY**: DTOs to include `campaignGroupId` and `priority`
-- [ ] **MODIFY**: Service to validate campaign group relationship
-- [ ] **MODIFY**: Controller to support filtering by campaign group
+**File**: `apps/api/src/single-sends/collision.service.ts`
+- [x] `checkCollision()` — Check if user was recently sent
+- [x] `checkPriorityCollision()` — Check for higher priority campaigns
+- [x] `batchCheckCollisions()` — Batch collision detection
+- [x] `recordSend()` — Log successful send for collision tracking
 
----
+### 2.10 Analytics
 
-## Phase 3: Component Library
-
-### 3.1 Components API
-
-**Files**: `apps/api/src/components/`
-
-- [ ] `components.controller.ts`
-  - `POST /api/components` — Create component
-  - `GET /api/components` — List components
-  - `GET /api/components/:id` — Get component
-  - `PATCH /api/components/:id` — Update component
-  - `DELETE /api/components/:id` — Delete component
-  - `POST /api/components/:id/preview` — Render preview
-
-- [ ] `components.service.ts`
-  - CRUD operations
-  - Variable validation
-  - Preview rendering (compile MJML → HTML)
-
-### 3.2 Component Resolution in Templates
-
-**File**: `packages/email/src/`
-
-- [ ] **MODIFY**: `compiler.ts`
-  - Register Handlebars partials from Component library
-  - Support `{{> componentName }}` syntax
-  - Pass variables to partials
-
-- [ ] `components.ts`
-  - Load all components from database
-  - Register as Handlebars partials
-  - Cache for performance
+**File**: `apps/api/src/analytics/`
+- [x] `GET /analytics/overview` — Dashboard stats
+- [x] `GET /analytics/daily` — Daily metrics over time
+- [x] `GET /analytics/recent-campaigns` — Recent campaign list
+- [x] `GET /analytics/campaigns/:id` — Campaign-specific stats
+- [x] `GET /analytics/skip-reasons` — Skip reason breakdown
 
 ---
 
-## Phase 4: Modern UI Design System
+## Phase 3: Web UI ✅ COMPLETE
 
-### 4.1 Design System Foundation
-
-**Files**: `apps/web/components/ui/`
-
-Create a comprehensive design system with dark theme:
-
-- [ ] **Colors & Theme** (`theme.ts`)
-  ```typescript
-  const colors = {
-    background: {
-      primary: '#0a0a0f',    // Near black
-      secondary: '#12121a',  // Card backgrounds
-      tertiary: '#1a1a24',   // Elevated surfaces
-    },
-    accent: {
-      primary: '#6366f1',    // Indigo
-      secondary: '#8b5cf6',  // Purple
-      success: '#10b981',    // Emerald
-      warning: '#f59e0b',    // Amber
-      danger: '#ef4444',     // Red
-    },
-    text: {
-      primary: '#f8fafc',
-      secondary: '#94a3b8',
-      muted: '#64748b',
-    },
-    border: {
-      default: '#1e293b',
-      hover: '#334155',
-    }
-  }
-  ```
-
-- [ ] **Typography** — Inter font, size scale
-- [ ] **Spacing** — 4px base unit
-- [ ] **Shadows** — Subtle glow effects
-- [ ] **Animations** — Smooth transitions
-
-### 4.2 Core UI Components
-
-- [ ] `button.tsx` — Primary, secondary, ghost, danger variants
-- [ ] `input.tsx` — Text input with label, error states
-- [ ] `select.tsx` — Dropdown with search
-- [ ] `textarea.tsx` — Multi-line input
-- [ ] `card.tsx` — Container with hover effects
-- [ ] `badge.tsx` — Status indicators
-- [ ] `table.tsx` — Data tables with sorting
-- [ ] `modal.tsx` — Dialog overlays
-- [ ] `tabs.tsx` — Tab navigation
-- [ ] `toast.tsx` — Notifications
-- [ ] `dropdown-menu.tsx` — Context menus
-- [ ] `command.tsx` — Command palette (Cmd+K)
-- [ ] `tooltip.tsx` — Hover tooltips
-- [ ] `skeleton.tsx` — Loading states
-- [ ] `empty-state.tsx` — No data placeholders
-
-### 4.3 Chart Components
-
-**Files**: `apps/web/components/charts/`
-
-- [ ] `area-chart.tsx` — Send volume over time
-- [ ] `bar-chart.tsx` — Campaign comparisons
-- [ ] `donut-chart.tsx` — Delivery status breakdown
-- [ ] `stat-card.tsx` — Metric display with trend
-
----
-
-## Phase 5: Frontend Pages
-
-### 5.1 Layout & Navigation
+### 3.1 Layout & Navigation
 
 **File**: `apps/web/app/layout.tsx`
+- [x] Sidebar navigation with icons
+- [x] Dark theme styling
+- [x] Responsive layout
 
-- [ ] Dark sidebar navigation with icons
-- [ ] Command palette (Cmd+K) for quick navigation
-- [ ] Breadcrumb navigation
-- [ ] User menu
-
-### 5.2 Dashboard
+### 3.2 Dashboard
 
 **File**: `apps/web/app/page.tsx`
+- [x] Stats cards (total sends, delivery rate, bounces, active campaigns)
+- [x] Send volume chart (30 days)
+- [x] Recent campaigns table
+- [x] Quick action buttons
 
-- [ ] Hero stats cards (total sends, delivery rate, active campaigns)
-- [ ] Send volume chart (last 30 days)
-- [ ] Recent campaigns table
-- [ ] Quick actions (new campaign, new segment, new template)
-- [ ] System health indicator
-
-### 5.3 Campaign Groups Page
+### 3.3 Campaign Groups
 
 **Files**: `apps/web/app/campaign-groups/`
+- [x] List view with collision policies
+- [x] Create/edit forms
+- [x] Collision stats display
 
-- [ ] List view with collision policy badges
-- [ ] Create/edit modal
-- [ ] Group detail with associated campaigns
-- [ ] Collision stats visualization
+### 3.4 Campaigns (Single Sends)
 
-### 5.4 Campaigns (Single Sends) Page
+**Files**: `apps/web/app/campaigns/` and `apps/web/app/single-sends/`
+- [x] List view with status badges
+- [x] Create/edit forms
+- [x] Campaign detail with run history
+- [x] Trigger action
 
-**Files**: `apps/web/app/campaigns/`
-
-- [ ] List view with status, last run, delivery stats
-- [ ] Create wizard (template → segment → sender → schedule → review)
-- [ ] Detail view with run history
-- [ ] Run detail with recipient breakdown
-- [ ] Trigger confirmation modal
-
-### 5.5 Segments Page
+### 3.5 Segments
 
 **Files**: `apps/web/app/segments/`
+- [x] List view
+- [x] SQL editor
+- [x] Dry-run with sample results
 
-- [ ] List view with query preview
-- [ ] SQL editor with syntax highlighting (Monaco)
-- [ ] Dry-run panel with count and sample data
-- [ ] Query validation feedback
-
-### 5.6 Templates Page
+### 3.6 Templates
 
 **Files**: `apps/web/app/templates/`
+- [x] List view
+- [x] Create/edit with mode selection
+- [x] Version history
+- [x] Preview rendering
 
-- [ ] List view with preview thumbnails
-- [ ] Create/edit with mode selection (HTML, MJML, Builder)
-- [ ] MJML editor with live preview
-- [ ] Version history timeline
-- [ ] Component insertion from library
+### 3.7 Components
 
-### 5.7 Components Page
+**Files**: `apps/web/app/email-components/`
+- [x] Component gallery
+- [x] Create/edit component
+- [x] Variable configuration
+- [x] Preview rendering
 
-**Files**: `apps/web/app/components/`
+### 3.8 Connectors
 
-- [ ] Gallery view with visual previews
-- [ ] Create/edit component
-- [ ] Variable configuration
-- [ ] Usage tracking (which templates use this)
+**Files**: `apps/web/app/data-connectors/` and `apps/web/app/email-connectors/`
+- [x] Data connector list and detail
+- [x] Email connector list and detail
+- [x] Test connection UI
 
-### 5.8 Connectors Page
+### 3.9 Sender Profiles
 
-**Files**: `apps/web/app/connectors/`
+**Files**: `apps/web/app/sender-profiles/`
+- [x] List view
+- [x] Create/edit forms
 
-- [ ] Data connectors list with connection status
-- [ ] Email connectors list
-- [ ] Sender profiles management
-- [ ] Test connection flow
-
-### 5.9 Settings Page
+### 3.10 Settings
 
 **Files**: `apps/web/app/settings/`
-
-- [ ] General settings
-- [ ] Default rate limits
-- [ ] Suppression list viewer
-- [ ] System diagnostics
+- [x] Settings page structure
 
 ---
 
-## Phase 6: Polish & Production Readiness
+## Phase 4: Worker Processors 🟡 IN PROGRESS
 
-### 6.1 Error Handling & Validation
+### 4.1 Single Send Processor
 
-- [ ] Global error boundary
-- [ ] Form validation with Zod
+**File**: `apps/worker/src/processors/single-send.processor.ts`
+- [x] Queue setup with BullMQ
+- [x] Basic job handler structure
+- [ ] Create SingleSendRun record
+- [ ] Enqueue segment job
+- [ ] Handle run status transitions
+
+### 4.2 Segment Processor
+
+**File**: `apps/worker/src/processors/segment.processor.ts`
+- [x] Basic processor structure
+- [ ] Execute SQL query via data connector
+- [ ] Apply collision filters
+- [ ] Create SingleSendRecipient records
+- [ ] Enqueue send jobs
+
+### 4.3 Send Processor
+
+**File**: `apps/worker/src/processors/send.processor.ts`
+- [x] Basic processor structure
+- [ ] Render template with variables
+- [ ] Send via email connector (SES)
+- [ ] Update Send record status
+- [ ] Record in SendLog for collision tracking
+- [ ] Handle retries and dead letter
+
+### 4.4 Events Processor
+
+**File**: `apps/worker/src/processors/events.processor.ts`
+- [x] Basic processor structure
+- [ ] Handle delivery events
+- [ ] Handle bounce events
+- [ ] Handle complaint events
+- [ ] Update suppression list
+
+---
+
+## Phase 5: End-to-End Flow 🔴 PENDING
+
+### 5.1 Campaign Execution Flow
+
+- [ ] Trigger campaign → create run → build audience → send emails
+- [ ] Collision detection at audience build time
+- [ ] Collision detection at send time (belt-and-suspenders)
+- [ ] Rate limiting per sender profile
+- [ ] Retry logic with exponential backoff
+
+### 5.2 Template Rendering
+
+- [x] MJML → HTML compilation
+- [x] Handlebars variable substitution
+- [ ] Component resolution from library
+- [ ] UI Builder schema compilation
+
+### 5.3 Email Delivery
+
+- [ ] SES integration end-to-end
+- [ ] Resend integration
+- [ ] SMTP integration
+
+### 5.4 Webhook Handling
+
+- [ ] SES SNS webhook endpoint
+- [ ] Resend webhook endpoint
+- [ ] Event processing and storage
+
+---
+
+## Phase 6: Testing & Polish 🟡 IN PROGRESS
+
+### 6.1 Testing Infrastructure
+
+- [x] Jest configuration with projects (unit/integration)
+- [x] Testcontainers for PostgreSQL
+- [x] Test fixtures factory
+- [x] Integration tests for templates API
+- [x] Integration tests for single-sends API
+- [ ] Unit tests for collision service
+- [ ] Unit tests for rendering service
+- [ ] E2E tests with Playwright
+
+### 6.2 Error Handling
+
+- [ ] Global exception filters
+- [ ] Validation error formatting
 - [ ] API error responses
-- [ ] Toast notifications for actions
 
-### 6.2 Loading States
+### 6.3 Documentation
 
-- [ ] Skeleton loaders for all pages
-- [ ] Optimistic updates where appropriate
-- [ ] Progress indicators for long operations
-
-### 6.3 Testing
-
-- [ ] API endpoint tests
-- [ ] Collision engine unit tests
-- [ ] Component rendering tests
-- [ ] E2E flow tests (Playwright)
-
-### 6.4 Documentation
-
+- [x] README.md
+- [x] ARCHITECTURE.md
+- [x] IMPLEMENTATION_PLAN.md
 - [ ] API documentation (OpenAPI/Swagger)
-- [ ] SQL query examples
 - [ ] Deployment guide
-- [ ] Troubleshooting guide
 
 ---
 
-## File Structure Summary
+## File Structure
 
 ```
 email-ops/
 ├── apps/
 │   ├── api/
 │   │   └── src/
-│   │       ├── campaign-groups/     # NEW
-│   │       ├── components/          # NEW
-│   │       ├── single-sends/
-│   │       │   └── collision.service.ts  # NEW
-│   │       ├── segments/
-│   │       ├── templates/
-│   │       ├── connectors/
-│   │       └── analytics/           # NEW
+│   │       ├── analytics/            ✅
+│   │       ├── campaign-groups/      ✅
+│   │       ├── common/               ✅
+│   │       ├── components/           ✅
+│   │       ├── data-connectors/      ✅
+│   │       ├── email-connectors/     ✅
+│   │       ├── health/               ✅
+│   │       ├── prisma/               ✅
+│   │       ├── segments/             ✅
+│   │       ├── sender-profiles/      ✅
+│   │       ├── single-sends/         ✅
+│   │       ├── templates/            ✅
+│   │       ├── transactional/        🔴 Scaffolded
+│   │       └── webhooks/             🔴 Scaffolded
 │   ├── worker/
-│   │   └── src/processors/
-│   │       ├── segment.processor.ts  # MODIFIED
-│   │       └── send.processor.ts     # MODIFIED
+│   │   └── src/
+│   │       └── processors/
+│   │           ├── single-send.processor.ts  🟡
+│   │           ├── segment.processor.ts      🟡
+│   │           ├── send.processor.ts         🟡
+│   │           └── events.processor.ts       🟡
 │   └── web/
-│       ├── app/
-│       │   ├── layout.tsx           # REDESIGNED
-│       │   ├── page.tsx             # REDESIGNED (Dashboard)
-│       │   ├── campaign-groups/     # NEW
-│       │   ├── campaigns/           # REDESIGNED
-│       │   ├── segments/            # REDESIGNED
-│       │   ├── templates/           # REDESIGNED
-│       │   ├── components/          # NEW
-│       │   ├── connectors/          # REDESIGNED
-│       │   └── settings/            # NEW
-│       └── components/
-│           ├── ui/                  # NEW (Design System)
-│           └── charts/              # NEW
+│       └── app/
+│           ├── campaign-groups/      ✅
+│           ├── campaigns/            ✅
+│           ├── data-connectors/      ✅
+│           ├── email-components/     ✅
+│           ├── email-connectors/     ✅
+│           ├── journeys/             🔴 Stub
+│           ├── segments/             ✅
+│           ├── sender-profiles/      ✅
+│           ├── settings/             ✅
+│           ├── single-sends/         ✅
+│           ├── templates/            ✅
+│           └── page.tsx              ✅ Dashboard
 ├── packages/
-│   ├── core/
-│   │   └── prisma/
-│   │       └── schema.prisma        # MODIFIED
-│   └── email/
-│       └── src/
-│           └── components.ts        # NEW
-├── ARCHITECTURE.md                  # NEW
-├── BUSINESS.md                      # NEW
-├── IMPLEMENTATION_PLAN.md           # THIS FILE
-├── SPEC.md
-└── README.md
+│   ├── core/                         ✅
+│   ├── connectors/                   ✅
+│   ├── email/                        ✅
+│   ├── ses/                          ✅
+│   └── ui-kit/                       ✅
+└── test/
+    └── integration/                  ✅
 ```
 
 ---
 
-## Implementation Order
+## Next Steps (Priority Order)
 
-### Week 1: Schema & Foundation
-1. Update Prisma schema
-2. Run migrations
-3. Implement CampaignGroup API
-
-### Week 2: Collision Engine
-4. Implement collision service
-5. Update segment processor
-6. Update send processor
-7. Add collision metrics
-
-### Week 3: Component Library
-8. Implement Component API
-9. Update email compiler
-10. Build component management UI
-
-### Week 4: UI Design System
-11. Create design tokens
-12. Build core UI components
-13. Implement dark theme
-
-### Week 5-6: Frontend Pages
-14. Dashboard
-15. Campaign Groups
-16. Campaigns (Single Sends)
-17. Segments
-18. Templates
-19. Components
-20. Connectors
-21. Settings
-
-### Week 7: Polish
-22. Error handling
-23. Loading states
-24. Testing
-25. Documentation
+1. **Complete Worker Processors** — Implement the actual job processing logic
+2. **End-to-End Campaign Flow** — Connect all pieces for a working send
+3. **Add Unit Tests** — Cover collision service and rendering logic
+4. **Webhook Integration** — Handle delivery/bounce/complaint events
+5. **Transactional API** — Enable programmatic email sending
 
 ---
 
 ## Success Criteria
 
-- [ ] All campaigns can be assigned to a campaign group
-- [ ] Collision engine prevents duplicate sends within window
-- [ ] Components can be reused across templates
-- [ ] UI is visually impressive with dark theme
-- [ ] Dashboard shows real-time analytics
-- [ ] All CRUD operations work end-to-end
-- [ ] No critical errors in production deployment
+- [x] All API endpoints functional
+- [x] Web UI for all features
+- [x] Campaign groups with collision policies
+- [x] Component library CRUD
+- [x] Integration test infrastructure
+- [ ] Complete campaign execution flow
+- [ ] Email delivery working end-to-end
+- [ ] Webhook event processing
+- [ ] 80%+ test coverage
