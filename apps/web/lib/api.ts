@@ -381,13 +381,17 @@ export interface CreateEmailConnectorDto {
 
 export const emailConnectors = {
   list: () => request<EmailConnector[]>('/email-connectors'),
-  get: (id: string) => request<EmailConnector>(`/email-connectors/${id}`),
+  get: (id: string, includeConfig = false) =>
+    request<EmailConnector>(`/email-connectors/${id}`, { params: { includeConfig: includeConfig ? 'true' : undefined } }),
   create: (data: Omit<CreateEmailConnectorDto, 'workspaceId'>) =>
     request<EmailConnector>('/email-connectors', { method: 'POST', body: { ...data, workspaceId: WORKSPACE_ID } }),
   update: (id: string, data: Partial<Omit<CreateEmailConnectorDto, 'workspaceId'>>) =>
     request<EmailConnector>(`/email-connectors/${id}`, { method: 'PATCH', body: data }),
   delete: (id: string) => request<void>(`/email-connectors/${id}`, { method: 'DELETE' }),
-  test: (id: string) => request<{ success: boolean; error?: string }>(`/email-connectors/${id}/test`, { method: 'POST', body: {} }),
+  test: (id: string) =>
+    request<{ ok: boolean }>(`/email-connectors/${id}/test`, { method: 'POST' }),
+  testConnection: (data: { type: EmailConnector['type']; config: Record<string, unknown> }) =>
+    request<{ ok: boolean }>('/email-connectors/test-connection', { method: 'POST', body: data }),
 };
 
 // =============================================================================

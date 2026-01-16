@@ -28,6 +28,19 @@ export class EmailConnectorsService {
     return { ...connector, config: { redacted: true } };
   }
 
+  private decryptConfig(configJson: any): Record<string, any> {
+    const encrypted = configJson?.encrypted;
+    if (typeof encrypted !== "string" || encrypted.length === 0) {
+      return {};
+    }
+    const plaintext = this.encryption.decrypt(encrypted);
+    try {
+      return JSON.parse(plaintext);
+    } catch {
+      return {};
+    }
+  }
+
   async create(input: {
     workspaceId: string;
     type: EmailProviderType;
@@ -53,11 +66,18 @@ export class EmailConnectorsService {
     return connectors.map((c) => this.sanitize(c));
   }
 
-  async get(workspaceId: string, id: string) {
+  async get(workspaceId: string, id: string, includeConfig = false) {
     const connector = await this.prisma.emailProviderConnector.findFirst({
       where: { id, workspaceId },
     });
     if (!connector) throw new NotFoundException("Email connector not found");
+
+    if (includeConfig) {
+      return {
+        ...connector,
+        config: this.decryptConfig(connector.config),
+      };
+    }
     return this.sanitize(connector);
   }
 
@@ -86,6 +106,16 @@ export class EmailConnectorsService {
     if (!existing) throw new NotFoundException("Email connector not found");
     await this.prisma.emailProviderConnector.delete({ where: { id } });
     return { ok: true };
+  }
+
+  async testById(workspaceId: string, id: string) {
+    const connector = await this.prisma.emailProviderConnector.findFirst({
+      where: { id, workspaceId },
+    });
+    if (!connector) throw new NotFoundException("Email connector not found");
+
+    const config = this.decryptConfig(connector.config);
+    return this.testConnection(connector.type as EmailProviderType, config);
   }
 
   async testConnection(type: EmailProviderType, config: Record<string, any>) {

@@ -1,335 +1,419 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { apiFetch } from "../../lib/api";
-
-type Connector = {
-  id: string;
-  name: string;
-  type: string;
-};
-
-type Segment = {
-  id: string;
-  name: string;
-  dataConnectorId: string;
-  sqlQuery: string;
-  dataConnector?: Connector;
-};
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import {
+  Database,
+  ArrowLeft,
+  Save,
+  Trash2,
+  AlertCircle,
+  Loader2,
+  RefreshCw,
+  Play,
+  X,
+  Users,
+  Code,
+  Table,
+} from 'lucide-react';
+import { api } from '@/lib/api';
+import type { Segment, DataConnector } from '@/lib/api';
 
 type DryRunResult = {
   count: number;
-  rows: any[];
+  rows: Record<string, unknown>[];
 };
 
 export default function SegmentEditor({
   segmentId,
-  workspaceId,
 }: {
   segmentId: string;
   workspaceId: string;
 }) {
+  const router = useRouter();
   const [segment, setSegment] = useState<Segment | null>(null);
-  const [connectors, setConnectors] = useState<Connector[]>([]);
+  const [connectors, setConnectors] = useState<DataConnector[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
 
-  const [name, setName] = useState("");
-  const [dataConnectorId, setDataConnectorId] = useState("");
-  const [sqlQuery, setSqlQuery] = useState("");
+  // Form state
+  const [name, setName] = useState('');
+  const [dataConnectorId, setDataConnectorId] = useState('');
+  const [sqlQuery, setSqlQuery] = useState('');
 
+  // Preview state
   const [preview, setPreview] = useState<DryRunResult | null>(null);
   const [previewLimit, setPreviewLimit] = useState(25);
 
   const columns = useMemo(() => {
     const row = preview?.rows?.[0];
-    if (!row || typeof row !== "object") return [];
+    if (!row || typeof row !== 'object') return [];
     return Object.keys(row).slice(0, 12);
   }, [preview?.rows]);
 
-  async function loadAll() {
-    setError(null);
+  const fetchData = useCallback(async () => {
     try {
-      const [s, cs] = await Promise.all([
-        apiFetch<any>(`/segments/${segmentId}`, { query: { workspaceId } }),
-        apiFetch<Connector[]>("/data-connectors", { query: { workspaceId } }),
+      setError(null);
+      const [seg, cons] = await Promise.all([
+        api.segments.get(segmentId),
+        api.dataConnectors.list(),
       ]);
-
-      const seg: Segment = {
-        id: s.id,
-        name: s.name,
-        dataConnectorId: s.dataConnectorId,
-        sqlQuery: s.sqlQuery,
-        dataConnector: s.dataConnector,
-      };
       setSegment(seg);
-      setConnectors(cs);
+      setConnectors(cons);
       setName(seg.name);
       setDataConnectorId(seg.dataConnectorId);
       setSqlQuery(seg.sqlQuery);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch segment');
+    } finally {
+      setIsLoading(false);
     }
-  }
+  }, [segmentId]);
 
   useEffect(() => {
-    loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segmentId, workspaceId]);
+    fetchData();
+  }, [fetchData]);
 
-  async function save() {
-    setSaving(true);
+  const handleSave = async () => {
     setError(null);
+    setIsSaving(true);
+
     try {
-      await apiFetch<Segment>(`/segments/${segmentId}`, {
-        method: "PATCH",
-        query: { workspaceId },
-        body: JSON.stringify({ name, dataConnectorId, sqlQuery }),
+      const updated = await api.segments.update(segmentId, {
+        name,
+        dataConnectorId,
+        sqlQuery,
       });
-      await loadAll();
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+      setSegment(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save segment');
     } finally {
-      setSaving(false);
+      setIsSaving(false);
     }
+  };
+
+  const handleRunPreview = async () => {
+    setError(null);
+    setIsRunning(true);
+
+    try {
+      // Save first to use latest query
+      await api.segments.update(segmentId, {
+        name,
+        dataConnectorId,
+        sqlQuery,
+      });
+
+      const result = await api.segments.dryRun(segmentId, previewLimit);
+      setPreview(result);
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to run preview');
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this segment? This action cannot be undone.')) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await api.segments.delete(segmentId);
+      router.push('/segments');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete segment');
+      setIsDeleting(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="animate-fade-in">
+        <div className="flex items-center gap-4 mb-8">
+          <div className="skeleton" style={{ height: '40px', width: '40px', borderRadius: '8px' }} />
+          <div>
+            <div className="skeleton" style={{ height: '28px', width: '200px', marginBottom: '8px' }} />
+            <div className="skeleton" style={{ height: '16px', width: '300px' }} />
+          </div>
+        </div>
+        <div className="skeleton" style={{ height: '500px', borderRadius: '16px' }} />
+      </div>
+    );
   }
 
-  async function runPreview() {
-    setSaving(true);
-    setError(null);
-    try {
-      // If user has unsaved SQL edits, save first so dry-run uses latest query.
-      await apiFetch<Segment>(`/segments/${segmentId}`, {
-        method: "PATCH",
-        query: { workspaceId },
-        body: JSON.stringify({ name, dataConnectorId, sqlQuery }),
-      });
-      const out = await apiFetch<DryRunResult>(
-        `/segments/${segmentId}/dry-run`,
-        {
-          method: "POST",
-          query: { workspaceId },
-          body: JSON.stringify({ limit: previewLimit }),
-        }
-      );
-      setPreview(out);
-      await loadAll();
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function remove() {
-    if (!confirm("Delete this segment?")) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await apiFetch<{ ok: true }>(`/segments/${segmentId}`, {
-        method: "DELETE",
-        query: { workspaceId },
-      });
-      window.location.href = `/segments?workspaceId=${encodeURIComponent(
-        workspaceId
-      )}`;
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setSaving(false);
-    }
+  if (!segment) {
+    return (
+      <div className="card">
+        <div className="empty-state">
+          <AlertCircle className="empty-state-icon text-rose-400" />
+          <h3 className="empty-state-title">Segment not found</h3>
+          <p className="empty-state-description">
+            The segment you&apos;re looking for doesn&apos;t exist or has been deleted.
+          </p>
+          <Link href="/segments" className="btn btn-primary">
+            <ArrowLeft className="w-4 h-4" />
+            Back to Segments
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="text-sm text-gray-600">
-            <Link
-              className="text-indigo-700 hover:underline"
-              href={`/segments?workspaceId=${encodeURIComponent(workspaceId)}`}
-            >
-              ← Segments
-            </Link>
+    <div className="animate-slide-up">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+          <Link href="/segments" className="btn btn-ghost p-2">
+            <ArrowLeft className="w-5 h-5" />
+          </Link>
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 flex items-center justify-center text-cyan-400">
+            <Users className="w-6 h-6" />
           </div>
-          <h1 className="text-2xl font-bold mt-2">
-            {segment ? segment.name : "Segment"}
-          </h1>
-          <div className="text-xs text-gray-600 mt-1">
-            Segment{" "}
-            <span className="font-mono">{segment?.id ?? segmentId}</span> ·
-            workspace <span className="font-mono">{workspaceId}</span>
+          <div>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">
+              {segment.name}
+            </h1>
+            <p className="text-sm text-[var(--text-muted)]">
+              {segment.dataConnector?.name || 'No connector'}
+            </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <button
-            className="text-sm border rounded px-3 py-2 disabled:opacity-50"
-            onClick={loadAll}
-            disabled={saving}
+            onClick={fetchData}
+            className="btn btn-secondary"
+            disabled={isSaving || isRunning}
           >
+            <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
           <button
-            className="text-sm border rounded px-3 py-2 text-red-700 disabled:opacity-50"
-            onClick={remove}
-            disabled={saving}
+            onClick={handleDelete}
+            className="btn btn-secondary text-rose-400 hover:bg-rose-500/10"
+            disabled={isDeleting}
           >
+            {isDeleting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
             Delete
           </button>
         </div>
       </div>
 
-      {error ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm whitespace-pre-wrap">
-          {error}
-          <div className="mt-2">
-            <Link
-              className="text-indigo-700 hover:underline"
-              href={`/segments?workspaceId=${encodeURIComponent(workspaceId)}`}
-            >
-              Back to segments
-            </Link>
-          </div>
+      {/* Error */}
+      {error && (
+        <div className="flex items-center gap-3 p-4 mb-6 rounded-lg bg-rose-500/10 border border-rose-500/20">
+          <AlertCircle className="w-5 h-5 text-rose-400 flex-shrink-0" />
+          <span className="text-rose-400 whitespace-pre-wrap">{error}</span>
+          <button onClick={() => setError(null)} className="ml-auto btn btn-ghost p-1">
+            <X className="w-4 h-4" />
+          </button>
         </div>
-      ) : null}
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white border rounded lg:col-span-2">
-          <div className="px-4 py-3 border-b flex items-center justify-between">
-            <h2 className="font-semibold">Definition</h2>
-            <div className="flex gap-2">
-              <button
-                className="text-sm border rounded px-3 py-2 disabled:opacity-50"
-                onClick={save}
-                disabled={saving}
-              >
-                Save
-              </button>
-              <button
-                className="text-sm bg-indigo-600 text-white rounded px-3 py-2 disabled:opacity-50"
-                onClick={runPreview}
-                disabled={saving}
-              >
-                Run preview
-              </button>
-            </div>
-          </div>
-
-          <div className="p-4 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <label className="text-sm md:col-span-2">
-                <div className="text-gray-600 mb-1">Name</div>
-                <input
-                  className="w-full border rounded px-3 py-2"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </label>
-              <label className="text-sm">
-                <div className="text-gray-600 mb-1">Connector</div>
-                {connectors.length > 0 ? (
-                  <select
-                    className="w-full border rounded px-3 py-2"
-                    value={dataConnectorId}
-                    onChange={(e) => setDataConnectorId(e.target.value)}
-                  >
-                    {connectors.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.type})
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    className="w-full border rounded px-3 py-2 font-mono text-xs"
-                    value={dataConnectorId}
-                    onChange={(e) => setDataConnectorId(e.target.value)}
-                    placeholder="dataConnectorId"
-                  />
-                )}
-              </label>
-            </div>
-
-            <label className="text-sm block">
-              <div className="text-gray-600 mb-1">SQL query</div>
-              <textarea
-                className="w-full border rounded px-3 py-2 font-mono text-xs h-64"
-                value={sqlQuery}
-                onChange={(e) => setSqlQuery(e.target.value)}
-              />
-              <div className="text-xs text-gray-500 mt-1">
-                Single SELECT/WITH only. Preview runs with a hard LIMIT and a 5s
-                timeout.
+        {/* Main Form */}
+        <div className="lg:col-span-2">
+          <div className="card-glow">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+                Segment Definition
+              </h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSave}
+                  className="btn btn-secondary"
+                  disabled={isSaving || isRunning}
+                >
+                  {isSaving ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  Save
+                </button>
+                <button
+                  onClick={handleRunPreview}
+                  className="btn btn-primary"
+                  disabled={isSaving || isRunning}
+                >
+                  {isRunning ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Play className="w-4 h-4" />
+                  )}
+                  Run Preview
+                </button>
               </div>
-            </label>
+            </div>
+
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-2">
+                  <label className="label">Name</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g., Active Users Last 30 Days"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={isSaving}
+                  />
+                </div>
+                <div>
+                  <label className="label">Data Connector</label>
+                  {connectors.length > 0 ? (
+                    <select
+                      className="select"
+                      value={dataConnectorId}
+                      onChange={(e) => setDataConnectorId(e.target.value)}
+                      disabled={isSaving}
+                    >
+                      {connectors.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.type})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      className="input font-mono text-sm"
+                      value={dataConnectorId}
+                      onChange={(e) => setDataConnectorId(e.target.value)}
+                      placeholder="dataConnectorId"
+                      disabled={isSaving}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="label flex items-center gap-2">
+                  <Code className="w-4 h-4" />
+                  SQL Query
+                </label>
+                <textarea
+                  className="textarea font-mono text-sm"
+                  rows={12}
+                  placeholder="SELECT user_id as recipient_id, email, json_build_object('name', name) as vars_json FROM users WHERE ..."
+                  value={sqlQuery}
+                  onChange={(e) => setSqlQuery(e.target.value)}
+                  disabled={isSaving}
+                />
+                <p className="text-xs text-[var(--text-muted)] mt-2">
+                  Must return: <code className="text-cyan-400">recipient_id</code>, <code className="text-cyan-400">email</code>, <code className="text-cyan-400">vars_json</code>.
+                  Only SELECT/WITH queries allowed. Preview runs with LIMIT and 5s timeout.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="bg-white border rounded">
-          <div className="px-4 py-3 border-b flex items-center justify-between">
-            <h2 className="font-semibold">Preview</h2>
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-gray-600">Limit</span>
-              <input
-                className="w-20 border rounded px-2 py-1"
-                type="number"
-                min={1}
-                max={100}
-                value={previewLimit}
-                onChange={(e) =>
-                  setPreviewLimit(parseInt(e.target.value || "25", 10))
-                }
-              />
-            </div>
-          </div>
-          <div className="p-4 space-y-3">
-            <div className="text-sm text-gray-700">
-              Count:{" "}
-              <span className="font-mono">{preview ? preview.count : "—"}</span>
+        {/* Preview Sidebar */}
+        <div className="space-y-6">
+          <div className="card-glow">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2">
+                <Table className="w-5 h-5" />
+                Preview
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[var(--text-muted)]">Limit</span>
+                <input
+                  type="number"
+                  className="input w-20 text-sm"
+                  min={1}
+                  max={100}
+                  value={previewLimit}
+                  onChange={(e) => setPreviewLimit(parseInt(e.target.value || '25', 10))}
+                />
+              </div>
             </div>
 
-            {preview && preview.rows.length > 0 ? (
-              <div className="border rounded overflow-auto">
-                <table className="min-w-full text-xs">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      {columns.map((c) => (
-                        <th
-                          key={c}
-                          className="text-left font-semibold px-2 py-2 whitespace-nowrap"
-                        >
-                          {c}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {preview.rows.slice(0, previewLimit).map((r, idx) => (
-                      <tr key={idx}>
-                        {columns.map((c) => (
-                          <td key={c} className="px-2 py-2 font-mono">
-                            {typeof r?.[c] === "object"
-                              ? JSON.stringify(r?.[c])
-                              : String(r?.[c] ?? "")}
-                          </td>
+            <div className="space-y-4">
+              {/* Count */}
+              <div className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-primary)]">
+                <span className="text-sm text-[var(--text-secondary)]">Total Count</span>
+                <span className="text-lg font-semibold text-[var(--text-primary)] font-mono">
+                  {preview ? preview.count.toLocaleString() : '—'}
+                </span>
+              </div>
+
+              {/* Results Table */}
+              {preview && preview.rows.length > 0 ? (
+                <div className="border border-[var(--border-default)] rounded-lg overflow-hidden">
+                  <div className="overflow-x-auto max-h-80">
+                    <table className="w-full text-xs">
+                      <thead className="bg-[var(--bg-primary)] border-b border-[var(--border-default)] sticky top-0">
+                        <tr>
+                          {columns.map((c) => (
+                            <th
+                              key={c}
+                              className="text-left font-semibold px-3 py-2 text-[var(--text-secondary)] whitespace-nowrap"
+                            >
+                              {c}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--border-default)]">
+                        {preview.rows.slice(0, previewLimit).map((row, idx) => (
+                          <tr key={idx} className="hover:bg-[var(--bg-primary)]/50">
+                            {columns.map((c) => (
+                              <td key={c} className="px-3 py-2 font-mono text-[var(--text-primary)]">
+                                {typeof row?.[c] === 'object'
+                                  ? JSON.stringify(row?.[c])
+                                  : String(row?.[c] ?? '')}
+                              </td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : preview ? (
+                <div className="text-sm text-[var(--text-muted)] text-center py-8">
+                  No rows returned.
+                </div>
+              ) : (
+                <div className="text-sm text-[var(--text-muted)] text-center py-8">
+                  Click <span className="text-[var(--text-primary)] font-medium">Run Preview</span> to execute the query.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Info Card */}
+          <div className="card-glow">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 flex-shrink-0">
+                <Database className="w-4 h-4" />
               </div>
-            ) : preview ? (
-              <div className="text-sm text-gray-600">No rows returned.</div>
-            ) : (
-              <div className="text-sm text-gray-600">
-                Click <span className="font-semibold">Run preview</span> to
-                execute the query.
+              <div>
+                <h4 className="font-medium text-[var(--text-primary)] mb-1">
+                  Query Requirements
+                </h4>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Your query must return these columns:
+                </p>
+                <ul className="text-xs text-[var(--text-muted)] mt-2 space-y-1">
+                  <li><code className="text-cyan-400">recipient_id</code> — Unique user identifier</li>
+                  <li><code className="text-cyan-400">email</code> — Email address</li>
+                  <li><code className="text-cyan-400">vars_json</code> — Template variables (JSON)</li>
+                </ul>
               </div>
-            )}
-            <div className="text-xs text-gray-500">
-              Uses API{" "}
-              <span className="font-mono">POST /segments/:id/dry-run</span>.
             </div>
           </div>
         </div>

@@ -40,12 +40,33 @@ export class SenderProfilesService {
     return this.prisma.senderProfile.findMany({
       where: { workspaceId },
       orderBy: { createdAt: "desc" },
+      include: {
+        emailProviderConnector: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
+        },
+        _count: {
+          select: { singleSends: true },
+        },
+      },
     });
   }
 
   async get(workspaceId: string, id: string) {
     const profile = await this.prisma.senderProfile.findFirst({
       where: { id, workspaceId },
+      include: {
+        emailProviderConnector: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
+        },
+      },
     });
     if (!profile) throw new NotFoundException("Sender profile not found");
     return profile;

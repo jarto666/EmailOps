@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
-import { ScheduleType, SingleSendStatus } from "@email-ops/core";
+import { CronExpressionParser } from "cron-parser";
+import { ScheduleType, SingleSendStatus, SingleSendRunStatus } from "@email-ops/core";
 import { PrismaService } from "../prisma/prisma.service";
 
 function validateCron(cronExpression: string | undefined, scheduleType: any) {
@@ -13,6 +14,14 @@ function validateCron(cronExpression: string | undefined, scheduleType: any) {
   if (parts.length < 5 || parts.length > 6) {
     throw new BadRequestException("cronExpression must have 5 or 6 fields.");
   }
+
+  // Validate the cron expression is parseable
+  try {
+    CronExpressionParser.parse(cronExpression);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Invalid cron expression";
+    throw new BadRequestException(`Invalid cron expression: ${message}`);
+  }
 }
 
 @Injectable()
@@ -23,11 +32,12 @@ export class SingleSendsService {
   ) {}
 
   private cronJobId(singleSendId: string) {
-    return `singleSend:${singleSendId}:cron`;
+    return `singleSend-${singleSendId}-cron`;
   }
 
   private async upsertSchedule(singleSend: {
     id: string;
+    status: SingleSendStatus;
     scheduleType: any;
     cronExpression: string | null;
   }) {
@@ -43,7 +53,10 @@ export class SingleSendsService {
       }
     }
 
+    // Only create CRON schedule if campaign is ACTIVE and schedule type is CRON
     if (singleSend.scheduleType !== ScheduleType.CRON) return;
+    if (singleSend.status !== SingleSendStatus.ACTIVE) return;
+
     validateCron(singleSend.cronExpression ?? undefined, ScheduleType.CRON);
 
     await this.singleSendQueue.add(
@@ -209,7 +222,7 @@ export class SingleSendsService {
     });
     if (!existing) throw new NotFoundException("Single send not found");
 
-    await this.upsertSchedule({ id, scheduleType: ScheduleType.MANUAL, cronExpression: null });
+    await this.upsertSchedule({ id, status: SingleSendStatus.DRAFT, scheduleType: ScheduleType.MANUAL, cronExpression: null });
     await this.prisma.singleSend.delete({ where: { id } });
     return { ok: true };
   }
@@ -217,20 +230,100 @@ export class SingleSendsService {
   async trigger(workspaceId: string, singleSendId: string) {
     const ss = await this.prisma.singleSend.findFirst({
       where: { id: singleSendId, workspaceId },
-      select: { id: true },
+      select: { id: true, status: true },
     });
     if (!ss) throw new NotFoundException("Single send not found");
+
+    if (ss.status !== SingleSendStatus.ACTIVE) {
+      throw new BadRequestException(
+        `Cannot trigger campaign with status ${ss.status}. Only ACTIVE campaigns can be triggered.`
+      );
+    }
+
+    // Check for overlapping runs - prevent triggering if there's already an active run
+    const activeRunStatuses = [
+      SingleSendRunStatus.CREATED,
+      SingleSendRunStatus.AUDIENCE_BUILDING,
+      SingleSendRunStatus.AUDIENCE_READY,
+      SingleSendRunStatus.SENDING,
+    ];
+
+    // Auto-timeout: mark runs older than 30 minutes as FAILED
+    const staleThreshold = new Date(Date.now() - 30 * 60 * 1000);
+    await this.prisma.singleSendRun.updateMany({
+      where: {
+        singleSendId,
+        status: { in: activeRunStatuses },
+        createdAt: { lt: staleThreshold },
+      },
+      data: {
+        status: SingleSendRunStatus.FAILED,
+        completedAt: new Date(),
+        stats: { error: "Timed out - no worker processed this run" },
+      },
+    });
+
+    const activeRun = await this.prisma.singleSendRun.findFirst({
+      where: {
+        singleSendId,
+        status: { in: activeRunStatuses },
+      },
+      select: { id: true, status: true, createdAt: true },
+    });
+
+    if (activeRun) {
+      throw new BadRequestException(
+        `Campaign already has an active run (${activeRun.status}). Wait for it to complete before triggering again.`
+      );
+    }
 
     const job = await this.singleSendQueue.add(
       "triggerSingleSend",
       { singleSendId },
       {
-        jobId: `singleSend:${singleSendId}:manual:${Date.now()}`,
+        jobId: `singleSend-${singleSendId}-manual-${Date.now()}`,
         removeOnComplete: true,
         removeOnFail: 100,
       }
     );
     return { ok: true, jobId: job.id };
+  }
+
+  /**
+   * Clean up stale runs that have been stuck for more than the specified minutes.
+   * Marks them as FAILED so new runs can be triggered.
+   */
+  async cleanupStaleRuns(workspaceId: string, staleMinutes = 30) {
+    const activeRunStatuses = [
+      SingleSendRunStatus.CREATED,
+      SingleSendRunStatus.AUDIENCE_BUILDING,
+      SingleSendRunStatus.AUDIENCE_READY,
+      SingleSendRunStatus.SENDING,
+    ];
+
+    const staleThreshold = new Date(Date.now() - staleMinutes * 60 * 1000);
+
+    // Get campaign IDs for this workspace
+    const campaigns = await this.prisma.singleSend.findMany({
+      where: { workspaceId },
+      select: { id: true },
+    });
+    const campaignIds = campaigns.map((c) => c.id);
+
+    const result = await this.prisma.singleSendRun.updateMany({
+      where: {
+        singleSendId: { in: campaignIds },
+        status: { in: activeRunStatuses },
+        createdAt: { lt: staleThreshold },
+      },
+      data: {
+        status: SingleSendRunStatus.FAILED,
+        completedAt: new Date(),
+        stats: { error: `Timed out after ${staleMinutes} minutes - no worker processed this run` },
+      },
+    });
+
+    return { ok: true, cleanedUp: result.count };
   }
 }
 

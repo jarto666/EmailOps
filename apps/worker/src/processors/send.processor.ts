@@ -1,7 +1,8 @@
 import { Processor, WorkerHost } from "@nestjs/bullmq";
 import { Job } from "bullmq";
 import { BadRequestException } from "@nestjs/common";
-import { AuthoringMode, EmailProviderType, EncryptionService } from "@email-ops/core";
+import { AuthoringMode, EmailProviderType, EncryptionService, SingleSendRunStatus } from "@email-ops/core";
+import { RecipientStatus, SendStatus } from "@prisma/client";
 import { EmailCompiler } from "@email-ops/email";
 import { SesService } from "@email-ops/ses";
 import { PrismaService } from "../prisma/prisma.service";
@@ -149,6 +150,8 @@ export class SendProcessor extends WorkerHost {
 
   private async sendEmail(job: Job<any, any, string>) {
     const singleSendRecipientId = job.data?.singleSendRecipientId;
+    console.log(`sendEmail job started: recipientId=${singleSendRecipientId}, attempt=${(job.attemptsMade ?? 0) + 1}/${job.opts.attempts ?? 1}`);
+
     if (!singleSendRecipientId)
       throw new BadRequestException("singleSendRecipientId is required");
 
@@ -179,7 +182,7 @@ export class SendProcessor extends WorkerHost {
       create: {
         singleSendRecipientId,
         idempotencyKey,
-        status: "QUEUED",
+        status: SendStatus.QUEUED,
         attempts: 1,
       },
       update: {
@@ -188,7 +191,7 @@ export class SendProcessor extends WorkerHost {
     });
 
     // If already sent, short-circuit.
-    if (send.status === "SENT" || rr.status === "SENT") {
+    if (send.status === SendStatus.SENT || rr.status === RecipientStatus.SENT) {
       return { ok: true, skipped: true };
     }
 
@@ -237,29 +240,35 @@ export class SendProcessor extends WorkerHost {
         secretAccessKey: sesCfg.secretAccessKey,
       });
 
+      console.log(`Sending email to ${rr.email} from ${from}`);
       const resp: any = await ses.sendEmail({
         from,
         to: [rr.email],
         subject: compiled.subject,
         html: compiled.html,
       });
+      console.log(`Email sent successfully to ${rr.email}, messageId=${resp?.MessageId}`);
 
       await this.prisma.$transaction([
         this.prisma.send.update({
           where: { id: send.id },
           data: {
-            status: "SENT",
+            status: SendStatus.SENT,
             providerMessageId: resp?.MessageId ?? resp?.messageId ?? undefined,
           },
         }),
         this.prisma.singleSendRecipient.update({
           where: { id: rr.id },
-          data: { status: "SENT", skipReason: null },
+          data: { status: RecipientStatus.SENT, skipReason: null },
         }),
       ]);
 
+      // Check if all recipients are done and update run status
+      await this.checkAndCompleteRun(rr.runId);
+
       return { ok: true, status: "sent", messageId: resp?.MessageId ?? null };
     } catch (e: any) {
+      console.error(`Error sending email to ${rr.email}: ${e?.message ?? e}`);
       // If this is the last attempt, mark as failed; otherwise allow retry.
       const isFinalAttempt =
         (job.opts.attempts ?? 1) <= (job.attemptsMade ?? 0) + 1;
@@ -267,16 +276,21 @@ export class SendProcessor extends WorkerHost {
       await this.prisma.$transaction([
         this.prisma.send.update({
           where: { id: send.id },
-          data: { status: isFinalAttempt ? "FAILED" : "QUEUED" },
+          data: { status: isFinalAttempt ? SendStatus.FAILED : SendStatus.QUEUED },
         }),
         this.prisma.singleSendRecipient.update({
           where: { id: rr.id },
           data: {
-            status: isFinalAttempt ? "FAILED" : "PENDING",
+            status: isFinalAttempt ? RecipientStatus.FAILED : RecipientStatus.PENDING,
             skipReason: String(e?.message ?? e),
           },
         }),
       ]);
+
+      // If final attempt failed, check if run should be completed
+      if (isFinalAttempt) {
+        await this.checkAndCompleteRun(rr.runId);
+      }
 
       throw e;
     }
@@ -302,13 +316,13 @@ export class SendProcessor extends WorkerHost {
       where: { idempotencyKey },
       create: {
         idempotencyKey,
-        status: "QUEUED",
+        status: SendStatus.QUEUED,
         attempts: 1,
       },
       update: { attempts: { increment: 1 } },
     });
 
-    if (send.status === "SENT") return { ok: true, skipped: true };
+    if (send.status === SendStatus.SENT) return { ok: true, skipped: true };
 
     const senderProfile = await this.prisma.senderProfile.findFirst({
       where: { id: senderProfileId, workspaceId },
@@ -361,7 +375,7 @@ export class SendProcessor extends WorkerHost {
       await this.prisma.send.update({
         where: { id: send.id },
         data: {
-          status: "SENT",
+          status: SendStatus.SENT,
           providerMessageId: resp?.MessageId ?? resp?.messageId ?? undefined,
         },
       });
@@ -372,9 +386,76 @@ export class SendProcessor extends WorkerHost {
         (job.opts.attempts ?? 1) <= (job.attemptsMade ?? 0) + 1;
       await this.prisma.send.update({
         where: { id: send.id },
-        data: { status: isFinalAttempt ? "FAILED" : "QUEUED" },
+        data: { status: isFinalAttempt ? SendStatus.FAILED : SendStatus.QUEUED },
       });
       throw e;
     }
+  }
+
+  /**
+   * Check if all recipients for a run have been processed.
+   * If so, mark the run as COMPLETED.
+   */
+  private async checkAndCompleteRun(runId: string) {
+    if (!runId) {
+      console.log("checkAndCompleteRun called with no runId");
+      return;
+    }
+
+    // Get all counts in one go to avoid race conditions
+    const [pendingCount, sentCount, failedCount, skippedCount, totalCount] = await Promise.all([
+      this.prisma.singleSendRecipient.count({ where: { runId, status: RecipientStatus.PENDING } }),
+      this.prisma.singleSendRecipient.count({ where: { runId, status: RecipientStatus.SENT } }),
+      this.prisma.singleSendRecipient.count({ where: { runId, status: RecipientStatus.FAILED } }),
+      this.prisma.singleSendRecipient.count({ where: { runId, status: RecipientStatus.SKIPPED } }),
+      this.prisma.singleSendRecipient.count({ where: { runId } }),
+    ]);
+
+    console.log(`checkAndCompleteRun(${runId}): total=${totalCount}, pending=${pendingCount}, sent=${sentCount}, failed=${failedCount}, skipped=${skippedCount}`);
+
+    // If there are still pending recipients, don't complete yet
+    if (pendingCount > 0) {
+      console.log(`Run ${runId} still has ${pendingCount} pending recipients, not completing`);
+      return;
+    }
+
+    // Safety check: don't mark as complete if no recipients were actually processed
+    const processedCount = sentCount + failedCount + skippedCount;
+    if (processedCount === 0) {
+      console.log(`Run ${runId} has no processed recipients (total=${totalCount}), not completing`);
+      return;
+    }
+
+    // Get the run to check its current status
+    const run = await this.prisma.singleSendRun.findFirst({
+      where: { id: runId },
+      select: { id: true, status: true },
+    });
+
+    // Only complete if currently in SENDING status
+    if (!run) {
+      console.log(`Run ${runId} not found`);
+      return;
+    }
+    if (run.status !== SingleSendRunStatus.SENDING) {
+      console.log(`Run ${runId} is in ${run.status} status, not SENDING, skipping completion`);
+      return;
+    }
+
+    await this.prisma.singleSendRun.update({
+      where: { id: runId },
+      data: {
+        status: SingleSendRunStatus.COMPLETED,
+        completedAt: new Date(),
+        stats: {
+          total: totalCount,
+          sent: sentCount,
+          failed: failedCount,
+          skipped: skippedCount,
+        },
+      },
+    });
+
+    console.log(`Run ${runId} marked as COMPLETED: ${sentCount} sent, ${failedCount} failed, ${skippedCount} skipped`);
   }
 }

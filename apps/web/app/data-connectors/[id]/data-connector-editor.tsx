@@ -1,18 +1,30 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { apiFetch } from "../../lib/api";
+import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import {
+  Database,
+  ArrowLeft,
+  Save,
+  Trash2,
+  AlertCircle,
+  Loader2,
+  RefreshCw,
+  CheckCircle2,
+  Plug,
+  X,
+  FileCode,
+} from 'lucide-react';
+import { api } from '@/lib/api';
+import type { DataConnector } from '@/lib/api';
 
-type DataConnectorType = "POSTGRES" | "BIGQUERY";
-type DataConnector = { id: string; name: string; type: DataConnectorType; config?: any };
-
-function defaultConfigFor(type: DataConnectorType): any {
+function defaultConfigFor(type: string): Record<string, unknown> {
   switch (type) {
-    case "POSTGRES":
-      return { connectionString: "postgresql://user:pass@host:5432/db" };
-    case "BIGQUERY":
-      return { projectId: "my-project", credentials: { client_email: "", private_key: "" } };
+    case 'POSTGRES':
+      return { connectionString: 'postgresql://user:pass@host:5432/db' };
+    case 'BIGQUERY':
+      return { projectId: 'my-project', credentials: { client_email: '', private_key: '' } };
     default:
       return {};
   }
@@ -20,170 +32,376 @@ function defaultConfigFor(type: DataConnectorType): any {
 
 export default function DataConnectorEditor({
   dataConnectorId,
-  workspaceId,
 }: {
   dataConnectorId: string;
   workspaceId: string;
 }) {
+  const router = useRouter();
   const [connector, setConnector] = useState<DataConnector | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const [name, setName] = useState("");
-  const [type, setType] = useState<DataConnectorType>("POSTGRES");
-  const [configJson, setConfigJson] = useState(
-    JSON.stringify(defaultConfigFor("POSTGRES"), null, 2)
-  );
+  // Form state
+  const [name, setName] = useState('');
+  const [type, setType] = useState<DataConnector['type']>('POSTGRES');
+  const [configJson, setConfigJson] = useState('');
 
-  async function load() {
-    setError(null);
+  const fetchConnector = useCallback(async () => {
     try {
-      const c = await apiFetch<DataConnector>(`/data-connectors/${dataConnectorId}`, {
-        query: { workspaceId },
-      });
-      setConnector(c);
-      setName(c.name);
-      setType(c.type);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+      setError(null);
+      const data = await api.dataConnectors.get(dataConnectorId);
+      setConnector(data);
+      setName(data.name);
+      setType(data.type);
+      // Config is redacted from API, show placeholder
+      setConfigJson(JSON.stringify(defaultConfigFor(data.type), null, 2));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch data connector');
+    } finally {
+      setIsLoading(false);
     }
-  }
+  }, [dataConnectorId]);
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataConnectorId, workspaceId]);
+    fetchConnector();
+  }, [fetchConnector]);
 
-  function insertTemplate() {
+  const insertTemplate = () => {
     setConfigJson(JSON.stringify(defaultConfigFor(type), null, 2));
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccessMessage(null);
+    setIsSaving(true);
+
+    try {
+      let config: Record<string, unknown> | undefined;
+      if (configJson?.trim()) {
+        try {
+          config = JSON.parse(configJson);
+        } catch {
+          throw new Error('Invalid JSON in config');
+        }
+      }
+
+      const updated = await api.dataConnectors.update(dataConnectorId, {
+        name,
+        type,
+        config,
+      });
+      setConnector(updated);
+      setSuccessMessage('Data connector updated successfully');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update data connector');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setError(null);
+    setSuccessMessage(null);
+    setIsTesting(true);
+
+    try {
+      let config: Record<string, unknown>;
+      try {
+        config = JSON.parse(configJson || '{}');
+      } catch {
+        throw new Error('Invalid JSON in config');
+      }
+
+      await api.dataConnectors.testConnection({ type, config });
+      setSuccessMessage('Connection successful!');
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Connection test failed');
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this data connector? This action cannot be undone.')) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await api.dataConnectors.delete(dataConnectorId);
+      router.push('/data-connectors');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete data connector');
+      setIsDeleting(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="animate-fade-in">
+        <div className="flex items-center gap-4 mb-8">
+          <div className="skeleton" style={{ height: '40px', width: '40px', borderRadius: '8px' }} />
+          <div>
+            <div className="skeleton" style={{ height: '28px', width: '200px', marginBottom: '8px' }} />
+            <div className="skeleton" style={{ height: '16px', width: '300px' }} />
+          </div>
+        </div>
+        <div className="skeleton" style={{ height: '400px', borderRadius: '16px' }} />
+      </div>
+    );
   }
 
-  async function save() {
-    setSaving(true);
-    setError(null);
-    try {
-      const config = configJson?.trim()?.length ? JSON.parse(configJson) : undefined;
-      await apiFetch<DataConnector>(`/data-connectors/${dataConnectorId}`, {
-        method: "PATCH",
-        query: { workspaceId },
-        body: JSON.stringify({ name, type, config }),
-      });
-      await load();
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function testConnection() {
-    setSaving(true);
-    setError(null);
-    try {
-      const config = JSON.parse(configJson || "{}");
-      await apiFetch<{ ok: true }>("/data-connectors/test-connection", {
-        method: "POST",
-        body: JSON.stringify({ type, config }),
-      });
-      setError("✅ Connection ok");
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function remove() {
-    if (!confirm("Delete this data connector?")) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await apiFetch<{ ok: true }>(`/data-connectors/${dataConnectorId}`, {
-        method: "DELETE",
-        query: { workspaceId },
-      });
-      window.location.href = `/data-connectors?workspaceId=${encodeURIComponent(
-        workspaceId
-      )}`;
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setSaving(false);
-    }
+  if (!connector) {
+    return (
+      <div className="card">
+        <div className="empty-state">
+          <AlertCircle className="empty-state-icon text-rose-400" />
+          <h3 className="empty-state-title">Data connector not found</h3>
+          <p className="empty-state-description">
+            The data connector you&apos;re looking for doesn&apos;t exist or has been deleted.
+          </p>
+          <Link href="/data-connectors" className="btn btn-primary">
+            <ArrowLeft className="w-4 h-4" />
+            Back to Connectors
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="text-sm text-gray-600">
-            <Link
-              className="text-indigo-700 hover:underline"
-              href={`/data-connectors?workspaceId=${encodeURIComponent(workspaceId)}`}
-            >
-              ← Data connectors
-            </Link>
+    <div className="animate-slide-up">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+          <Link href="/data-connectors" className="btn btn-ghost p-2">
+            <ArrowLeft className="w-5 h-5" />
+          </Link>
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 flex items-center justify-center text-emerald-400">
+            <Database className="w-6 h-6" />
           </div>
-          <h1 className="text-2xl font-bold mt-2">
-            {connector ? connector.name : "Data connector"}
-          </h1>
-          <div className="text-xs text-gray-600 mt-1">
-            id <span className="font-mono">{dataConnectorId}</span>
+          <div>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">
+              {connector.name}
+            </h1>
+            <p className="text-sm text-[var(--text-muted)] font-mono">
+              {connector.type}
+            </p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <button className="text-sm border rounded px-3 py-2" onClick={load} disabled={saving}>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchConnector}
+            className="btn btn-secondary"
+            disabled={isSaving || isTesting}
+          >
+            <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
-          <button className="text-sm border rounded px-3 py-2" onClick={testConnection} disabled={saving}>
+          <button
+            onClick={handleTestConnection}
+            className="btn btn-secondary"
+            disabled={isSaving || isTesting}
+          >
+            {isTesting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Plug className="w-4 h-4" />
+            )}
             Test
           </button>
-          <button className="text-sm bg-indigo-600 text-white rounded px-3 py-2" onClick={save} disabled={saving}>
-            Save
-          </button>
-          <button className="text-sm border rounded px-3 py-2 text-red-700" onClick={remove} disabled={saving}>
+          <button
+            onClick={handleDelete}
+            className="btn btn-secondary text-rose-400 hover:bg-rose-500/10"
+            disabled={isDeleting}
+          >
+            {isDeleting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
             Delete
           </button>
         </div>
       </div>
 
-      {error ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm whitespace-pre-wrap">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="bg-white border rounded">
-        <div className="px-4 py-3 border-b flex items-center justify-between">
-          <h2 className="font-semibold">Settings</h2>
-          <button className="text-sm border rounded px-3 py-1.5" type="button" onClick={insertTemplate}>
-            Insert template
+      {/* Messages */}
+      {error && (
+        <div className="flex items-center gap-3 p-4 mb-6 rounded-lg bg-rose-500/10 border border-rose-500/20">
+          <AlertCircle className="w-5 h-5 text-rose-400 flex-shrink-0" />
+          <span className="text-rose-400 whitespace-pre-wrap">{error}</span>
+          <button onClick={() => setError(null)} className="ml-auto btn btn-ghost p-1">
+            <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="p-4 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-            <label className="text-sm md:col-span-2">
-              <div className="text-gray-600 mb-1">Name</div>
-              <input className="w-full border rounded px-3 py-2" value={name} onChange={(e) => setName(e.target.value)} />
-            </label>
-            <label className="text-sm">
-              <div className="text-gray-600 mb-1">Type</div>
-              <select className="w-full border rounded px-3 py-2" value={type} onChange={(e) => setType(e.target.value as DataConnectorType)}>
-                <option value="POSTGRES">POSTGRES</option>
-                <option value="BIGQUERY">BIGQUERY</option>
-              </select>
-            </label>
-          </div>
-          <label className="text-sm block">
-            <div className="text-gray-600 mb-1">Config (JSON)</div>
-            <textarea className="w-full border rounded px-3 py-2 font-mono text-xs h-56" value={configJson} onChange={(e) => setConfigJson(e.target.value)} />
-            <div className="text-xs text-gray-500 mt-1">
-              Stored secrets are never returned by the API (paste again to test/update).
+      )}
+
+      {successMessage && (
+        <div className="flex items-center gap-3 p-4 mb-6 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+          <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+          <span className="text-emerald-400">{successMessage}</span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Main Form */}
+        <div className="lg:col-span-2">
+          <form onSubmit={handleSave} className="card-glow">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+                Connection Settings
+              </h2>
+              <button
+                type="button"
+                onClick={insertTemplate}
+                className="btn btn-ghost text-sm"
+              >
+                <FileCode className="w-4 h-4" />
+                Insert Template
+              </button>
             </div>
-          </label>
+
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-2">
+                  <label className="label">Name</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g., Production Database"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    disabled={isSaving}
+                  />
+                </div>
+                <div>
+                  <label className="label">Type</label>
+                  <select
+                    className="select"
+                    value={type}
+                    onChange={(e) => setType(e.target.value as DataConnector['type'])}
+                    disabled={isSaving}
+                  >
+                    <option value="POSTGRES">PostgreSQL</option>
+                    <option value="BIGQUERY">BigQuery</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="label">Configuration (JSON)</label>
+                <textarea
+                  className="textarea font-mono text-sm"
+                  rows={10}
+                  placeholder='{"connectionString": "postgresql://..."}'
+                  value={configJson}
+                  onChange={(e) => setConfigJson(e.target.value)}
+                  disabled={isSaving}
+                />
+                <p className="text-xs text-[var(--text-muted)] mt-2">
+                  Stored secrets are never returned by the API. Paste credentials again to update.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-6 mt-6 border-t border-[var(--border-default)]">
+              <Link href="/data-connectors" className="btn btn-secondary">
+                Cancel
+              </Link>
+              <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Changes
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Sidebar */}
+        <div className="space-y-6">
+          {/* Info Card */}
+          <div className="card-glow">
+            <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">
+              Connection Info
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <span className="text-xs text-[var(--text-muted)]">ID</span>
+                <p className="text-sm text-[var(--text-secondary)] font-mono break-all">
+                  {connector.id}
+                </p>
+              </div>
+              <div>
+                <span className="text-xs text-[var(--text-muted)]">Type</span>
+                <p className="text-sm text-[var(--text-primary)]">
+                  {connector.type === 'POSTGRES' ? 'PostgreSQL' : 'BigQuery'}
+                </p>
+              </div>
+              <div>
+                <span className="text-xs text-[var(--text-muted)]">Created</span>
+                <p className="text-sm text-[var(--text-secondary)]">
+                  {new Date(connector.createdAt).toLocaleDateString()}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Help Card */}
+          <div className="card-glow">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400 flex-shrink-0">
+                <Database className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="font-medium text-[var(--text-primary)] mb-1">
+                  Configuration Help
+                </h4>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  {type === 'POSTGRES' ? (
+                    <>Use a connection string format: <code className="text-emerald-400">postgresql://user:pass@host:5432/db</code></>
+                  ) : (
+                    <>Provide your GCP project ID and service account credentials JSON.</>
+                  )}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Security Note */}
+          <div className="card-glow">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400 flex-shrink-0">
+                <AlertCircle className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="font-medium text-[var(--text-primary)] mb-1">
+                  Security Note
+                </h4>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Credentials are encrypted at rest and never exposed via the API.
+                  Use read-only database credentials for added safety.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
-

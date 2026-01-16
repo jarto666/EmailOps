@@ -21,8 +21,12 @@ export class EmailConnectorsController {
   }
 
   @Get(":id")
-  get(@Param("id") id: string, @Query("workspaceId") workspaceId: string) {
-    return this.connectors.get(workspaceId, id);
+  get(
+    @Param("id") id: string,
+    @Query("workspaceId") workspaceId: string,
+    @Query("includeConfig") includeConfig?: string
+  ) {
+    return this.connectors.get(workspaceId, id, includeConfig === "true");
   }
 
   @Patch(":id")
@@ -42,6 +46,14 @@ export class EmailConnectorsController {
   @Post("test-connection")
   testConnection(@Body() dto: TestEmailConnectorDto) {
     return this.connectors.testConnection(dto.type, dto.config);
+  }
+
+  @Post(":id/test")
+  testById(
+    @Param("id") id: string,
+    @Query("workspaceId") workspaceId: string
+  ) {
+    return this.connectors.testById(workspaceId, id);
   }
 }
 

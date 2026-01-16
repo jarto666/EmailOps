@@ -20,6 +20,17 @@ export class SingleSendsController {
     return this.singleSends.list(workspaceId);
   }
 
+  @Get("actions/cleanup-stale-runs")
+  cleanupStaleRuns(
+    @Query("workspaceId") workspaceId: string,
+    @Query("staleMinutes") staleMinutes?: string
+  ) {
+    return this.singleSends.cleanupStaleRuns(
+      workspaceId,
+      staleMinutes ? parseInt(staleMinutes, 10) : 30
+    );
+  }
+
   @Get(":id")
   get(@Param("id") id: string, @Query("workspaceId") workspaceId: string) {
     return this.singleSends.get(workspaceId, id);

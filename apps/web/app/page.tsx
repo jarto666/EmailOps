@@ -369,11 +369,11 @@ export default function DashboardPage() {
                         <StatusBadge status={campaign.status} />
                       </td>
                       <td className="py-4 px-4 text-muted-foreground">
-                        {campaign.totalSent.toLocaleString()}
+                        {(campaign.totalSent ?? 0).toLocaleString()}
                       </td>
                       <td className="py-4 px-4">
-                        <span className={campaign.deliveryRate >= 98 ? 'text-emerald-400' : 'text-muted-foreground'}>
-                          {campaign.deliveryRate > 0 ? `${campaign.deliveryRate.toFixed(1)}%` : '-'}
+                        <span className={(campaign.deliveryRate ?? 0) >= 98 ? 'text-emerald-400' : 'text-muted-foreground'}>
+                          {(campaign.deliveryRate ?? 0) > 0 ? `${(campaign.deliveryRate ?? 0).toFixed(1)}%` : '-'}
                         </span>
                       </td>
                       <td className="py-4 px-4 text-muted-foreground">

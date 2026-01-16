@@ -1,177 +1,371 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { apiFetch } from "../../lib/api";
-
-type SenderProfile = {
-  id: string;
-  emailProviderConnectorId: string;
-  fromEmail: string;
-  fromName?: string | null;
-  replyTo?: string | null;
-};
+import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import {
+  Send,
+  ArrowLeft,
+  Save,
+  Trash2,
+  AlertCircle,
+  Loader2,
+  RefreshCw,
+  CheckCircle2,
+  X,
+  Mail,
+  User,
+  Reply,
+} from 'lucide-react';
+import { api } from '@/lib/api';
+import type { SenderProfile } from '@/lib/api';
 
 export default function SenderProfileEditor({
   senderProfileId,
-  workspaceId,
 }: {
   senderProfileId: string;
   workspaceId: string;
 }) {
+  const router = useRouter();
   const [profile, setProfile] = useState<SenderProfile | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const [fromEmail, setFromEmail] = useState("");
-  const [fromName, setFromName] = useState("");
-  const [replyTo, setReplyTo] = useState("");
+  // Form state
+  const [name, setName] = useState('');
+  const [fromEmail, setFromEmail] = useState('');
+  const [fromName, setFromName] = useState('');
+  const [replyTo, setReplyTo] = useState('');
 
-  async function load() {
-    setError(null);
+  const fetchProfile = useCallback(async () => {
     try {
-      const p = await apiFetch<SenderProfile>(`/sender-profiles/${senderProfileId}`, {
-        query: { workspaceId },
-      });
-      setProfile(p);
-      setFromEmail(p.fromEmail);
-      setFromName(p.fromName ?? "");
-      setReplyTo(p.replyTo ?? "");
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+      setError(null);
+      const data = await api.senderProfiles.get(senderProfileId);
+      setProfile(data);
+      setName(data.name || '');
+      setFromEmail(data.fromEmail);
+      setFromName(data.fromName || '');
+      setReplyTo(data.replyTo || '');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch sender profile');
+    } finally {
+      setIsLoading(false);
     }
-  }
+  }, [senderProfileId]);
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [senderProfileId, workspaceId]);
+    fetchProfile();
+  }, [fetchProfile]);
 
-  async function save() {
-    setSaving(true);
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError(null);
+    setSuccessMessage(null);
+    setIsSaving(true);
+
     try {
-      await apiFetch<SenderProfile>(`/sender-profiles/${senderProfileId}`, {
-        method: "PATCH",
-        query: { workspaceId },
-        body: JSON.stringify({
-          fromEmail,
-          fromName: fromName || undefined,
-          replyTo: replyTo || undefined,
-        }),
+      const updated = await api.senderProfiles.update(senderProfileId, {
+        name: name || undefined,
+        fromEmail,
+        fromName: fromName || undefined,
+        replyTo: replyTo || undefined,
       });
-      await load();
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+      setProfile(updated);
+      setSuccessMessage('Sender profile updated successfully');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update sender profile');
     } finally {
-      setSaving(false);
+      setIsSaving(false);
     }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this sender profile? This action cannot be undone.')) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await api.senderProfiles.delete(senderProfileId);
+      router.push('/sender-profiles');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete sender profile');
+      setIsDeleting(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="animate-fade-in">
+        <div className="flex items-center gap-4 mb-8">
+          <div className="skeleton" style={{ height: '40px', width: '40px', borderRadius: '8px' }} />
+          <div>
+            <div className="skeleton" style={{ height: '28px', width: '200px', marginBottom: '8px' }} />
+            <div className="skeleton" style={{ height: '16px', width: '300px' }} />
+          </div>
+        </div>
+        <div className="skeleton" style={{ height: '400px', borderRadius: '16px' }} />
+      </div>
+    );
   }
 
-  async function remove() {
-    if (!confirm("Delete this sender profile?")) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await apiFetch<{ ok: true }>(`/sender-profiles/${senderProfileId}`, {
-        method: "DELETE",
-        query: { workspaceId },
-      });
-      window.location.href = `/sender-profiles?workspaceId=${encodeURIComponent(
-        workspaceId
-      )}`;
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setSaving(false);
-    }
+  if (!profile) {
+    return (
+      <div className="card">
+        <div className="empty-state">
+          <AlertCircle className="empty-state-icon text-rose-400" />
+          <h3 className="empty-state-title">Sender profile not found</h3>
+          <p className="empty-state-description">
+            The sender profile you&apos;re looking for doesn&apos;t exist or has been deleted.
+          </p>
+          <Link href="/sender-profiles" className="btn btn-primary">
+            <ArrowLeft className="w-4 h-4" />
+            Back to Sender Profiles
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="text-sm text-gray-600">
-            <Link
-              className="text-indigo-700 hover:underline"
-              href={`/sender-profiles?workspaceId=${encodeURIComponent(workspaceId)}`}
-            >
-              ← Sender profiles
-            </Link>
+    <div className="animate-slide-up">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+          <Link href="/sender-profiles" className="btn btn-ghost p-2">
+            <ArrowLeft className="w-5 h-5" />
+          </Link>
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500/20 to-amber-500/20 flex items-center justify-center text-orange-400">
+            <Send className="w-6 h-6" />
           </div>
-          <h1 className="text-2xl font-bold mt-2">
-            {profile ? profile.fromEmail : "Sender profile"}
-          </h1>
-          <div className="text-xs text-gray-600 mt-1">
-            id <span className="font-mono">{senderProfileId}</span> · email connector{" "}
-            <span className="font-mono">
-              {profile?.emailProviderConnectorId ?? "—"}
-            </span>
+          <div>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">
+              {profile.name || profile.fromEmail}
+            </h1>
+            <p className="text-sm text-[var(--text-muted)]">
+              {profile.fromEmail}
+            </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <button
-            className="text-sm border rounded px-3 py-2 disabled:opacity-50"
-            onClick={load}
-            disabled={saving}
+            onClick={fetchProfile}
+            className="btn btn-secondary"
+            disabled={isSaving}
           >
+            <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
           <button
-            className="text-sm border rounded px-3 py-2 disabled:opacity-50"
-            onClick={save}
-            disabled={saving}
+            onClick={handleDelete}
+            className="btn btn-secondary text-rose-400 hover:bg-rose-500/10"
+            disabled={isDeleting}
           >
-            Save
-          </button>
-          <button
-            className="text-sm border rounded px-3 py-2 text-red-700 disabled:opacity-50"
-            onClick={remove}
-            disabled={saving}
-          >
+            {isDeleting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
             Delete
           </button>
         </div>
       </div>
 
-      {error ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm whitespace-pre-wrap">
-          {error}
+      {/* Messages */}
+      {error && (
+        <div className="flex items-center gap-3 p-4 mb-6 rounded-lg bg-rose-500/10 border border-rose-500/20">
+          <AlertCircle className="w-5 h-5 text-rose-400 flex-shrink-0" />
+          <span className="text-rose-400 whitespace-pre-wrap">{error}</span>
+          <button onClick={() => setError(null)} className="ml-auto btn btn-ghost p-1">
+            <X className="w-4 h-4" />
+          </button>
         </div>
-      ) : null}
+      )}
 
-      <div className="bg-white border rounded">
-        <div className="px-4 py-3 border-b">
-          <h2 className="font-semibold">Settings</h2>
+      {successMessage && (
+        <div className="flex items-center gap-3 p-4 mb-6 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+          <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+          <span className="text-emerald-400">{successMessage}</span>
         </div>
-        <div className="p-4 space-y-4">
-          <label className="text-sm block">
-            <div className="text-gray-600 mb-1">From email</div>
-            <input
-              className="w-full border rounded px-3 py-2"
-              value={fromEmail}
-              onChange={(e) => setFromEmail(e.target.value)}
-            />
-          </label>
-          <label className="text-sm block">
-            <div className="text-gray-600 mb-1">From name (optional)</div>
-            <input
-              className="w-full border rounded px-3 py-2"
-              value={fromName}
-              onChange={(e) => setFromName(e.target.value)}
-            />
-          </label>
-          <label className="text-sm block">
-            <div className="text-gray-600 mb-1">Reply-to (optional)</div>
-            <input
-              className="w-full border rounded px-3 py-2"
-              value={replyTo}
-              onChange={(e) => setReplyTo(e.target.value)}
-            />
-          </label>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Main Form */}
+        <div className="lg:col-span-2">
+          <form onSubmit={handleSave} className="card-glow">
+            <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-6">
+              Sender Settings
+            </h2>
+
+            <div className="space-y-5">
+              <div>
+                <label className="label flex items-center gap-2">
+                  <User className="w-4 h-4" />
+                  Profile Name
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., Marketing Team"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  disabled={isSaving}
+                />
+                <p className="text-xs text-[var(--text-muted)] mt-1">
+                  Internal name to identify this sender profile.
+                </p>
+              </div>
+
+              <div>
+                <label className="label flex items-center gap-2">
+                  <Mail className="w-4 h-4" />
+                  From Email
+                </label>
+                <input
+                  type="email"
+                  className="input"
+                  placeholder="hello@example.com"
+                  value={fromEmail}
+                  onChange={(e) => setFromEmail(e.target.value)}
+                  required
+                  disabled={isSaving}
+                />
+                <p className="text-xs text-[var(--text-muted)] mt-1">
+                  The email address that will appear in the From field.
+                </p>
+              </div>
+
+              <div>
+                <label className="label flex items-center gap-2">
+                  <User className="w-4 h-4" />
+                  From Name
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., Your Company"
+                  value={fromName}
+                  onChange={(e) => setFromName(e.target.value)}
+                  disabled={isSaving}
+                />
+                <p className="text-xs text-[var(--text-muted)] mt-1">
+                  The display name shown to recipients.
+                </p>
+              </div>
+
+              <div>
+                <label className="label flex items-center gap-2">
+                  <Reply className="w-4 h-4" />
+                  Reply-To Email
+                </label>
+                <input
+                  type="email"
+                  className="input"
+                  placeholder="support@example.com"
+                  value={replyTo}
+                  onChange={(e) => setReplyTo(e.target.value)}
+                  disabled={isSaving}
+                />
+                <p className="text-xs text-[var(--text-muted)] mt-1">
+                  Where replies will be sent. Leave empty to use the From email.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-6 mt-6 border-t border-[var(--border-default)]">
+              <Link href="/sender-profiles" className="btn btn-secondary">
+                Cancel
+              </Link>
+              <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Changes
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Sidebar */}
+        <div className="space-y-6">
+          {/* Info Card */}
+          <div className="card-glow">
+            <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">
+              Profile Info
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <span className="text-xs text-[var(--text-muted)]">ID</span>
+                <p className="text-sm text-[var(--text-secondary)] font-mono break-all">
+                  {profile.id}
+                </p>
+              </div>
+              <div>
+                <span className="text-xs text-[var(--text-muted)]">Email Connector</span>
+                <p className="text-sm text-[var(--text-secondary)] font-mono break-all">
+                  {profile.emailProviderConnectorId}
+                </p>
+              </div>
+              <div>
+                <span className="text-xs text-[var(--text-muted)]">Created</span>
+                <p className="text-sm text-[var(--text-secondary)]">
+                  {new Date(profile.createdAt).toLocaleDateString()}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Preview Card */}
+          <div className="card-glow">
+            <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">
+              Email Preview
+            </h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-start gap-2">
+                <span className="text-[var(--text-muted)] w-16">From:</span>
+                <span className="text-[var(--text-primary)]">
+                  {fromName ? `${fromName} <${fromEmail}>` : fromEmail}
+                </span>
+              </div>
+              {replyTo && (
+                <div className="flex items-start gap-2">
+                  <span className="text-[var(--text-muted)] w-16">Reply-To:</span>
+                  <span className="text-[var(--text-primary)]">{replyTo}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Help Card */}
+          <div className="card-glow">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-orange-500/20 flex items-center justify-center text-orange-400 flex-shrink-0">
+                <Send className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="font-medium text-[var(--text-primary)] mb-1">
+                  Sender Best Practices
+                </h4>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Use a verified domain for better deliverability. Make sure your
+                  email provider has the domain configured and verified.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
-

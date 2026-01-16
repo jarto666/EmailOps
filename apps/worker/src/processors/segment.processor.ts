@@ -2,7 +2,8 @@ import { InjectQueue, Processor, WorkerHost } from "@nestjs/bullmq";
 import { Job, Queue } from "bullmq";
 import { BadRequestException } from "@nestjs/common";
 import { ConnectorFactory } from "@email-ops/connectors";
-import { DataConnectorType, EncryptionService } from "@email-ops/core";
+import { DataConnectorType, EncryptionService, SingleSendRunStatus } from "@email-ops/core";
+import { RecipientStatus, SingleSendRecipient } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 
 @Processor("segment")
@@ -75,7 +76,7 @@ export class SegmentProcessor extends WorkerHost {
 
     await this.prisma.singleSendRun.update({
       where: { id: runId },
-      data: { status: "AUDIENCE_BUILDING" },
+      data: { status: SingleSendRunStatus.AUDIENCE_BUILDING },
     });
 
     // Use shared adapters (read-only enforced for Postgres).
@@ -101,10 +102,24 @@ export class SegmentProcessor extends WorkerHost {
 
     try {
       const rows = await adapter.query<any>(segment.sqlQuery);
+      const singleSendId = run.singleSendId;
+
+      // Get all subjectIds that have already been sent to in previous runs for this campaign
+      // This ensures we don't send the same campaign to the same person multiple times
+      const previouslySent = await this.prisma.singleSendRecipient.findMany({
+        where: {
+          run: { singleSendId },
+          status: RecipientStatus.SENT,
+        },
+        select: { subjectId: true },
+      });
+      const alreadySentSubjectIds = new Set(previouslySent.map(r => r.subjectId));
+      console.log(`Found ${alreadySentSubjectIds.size} recipients already sent for campaign ${singleSendId}`);
 
       // Bulk insert into SingleSendRecipient with idempotency.
       const batchSize = 500;
       let inserted = 0;
+      let skippedDedup = 0;
 
       for (let i = 0; i < rows.length; i += batchSize) {
         const batch = rows.slice(i, i + batchSize);
@@ -126,9 +141,17 @@ export class SegmentProcessor extends WorkerHost {
               }
             }
             if (!subjectId || !email) return null;
+
+            // Skip if this subject has already received this campaign
+            const subjectIdStr = String(subjectId);
+            if (alreadySentSubjectIds.has(subjectIdStr)) {
+              skippedDedup++;
+              return null;
+            }
+
             return {
               runId,
-              subjectId: String(subjectId),
+              subjectId: subjectIdStr,
               email: String(email),
               vars: vars ?? undefined,
             };
@@ -144,18 +167,20 @@ export class SegmentProcessor extends WorkerHost {
         inserted += res.count;
       }
 
+      console.log(`Audience built: ${rows.length} from query, ${skippedDedup} skipped (already sent), ${inserted} new recipients`);
+
       await this.prisma.singleSendRun.update({
         where: { id: runId },
         data: {
-          status: "AUDIENCE_READY",
-          stats: { total: rows.length, inserted },
+          status: SingleSendRunStatus.AUDIENCE_READY,
+          stats: { total: rows.length, inserted, skippedDedup },
         },
       });
 
       // Enqueue sends for all pending recipients (paged).
       await this.prisma.singleSendRun.update({
         where: { id: runId },
-        data: { status: "SENDING" },
+        data: { status: SingleSendRunStatus.SENDING },
       });
 
       const pageSize = 500;
@@ -165,7 +190,7 @@ export class SegmentProcessor extends WorkerHost {
       for (;;) {
         const page: Array<{ id: string }> =
           await this.prisma.singleSendRecipient.findMany({
-            where: { runId, status: "PENDING" },
+            where: { runId, status: RecipientStatus.PENDING },
             orderBy: { id: "asc" },
             take: pageSize,
             ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -178,7 +203,7 @@ export class SegmentProcessor extends WorkerHost {
             "sendEmail",
             { singleSendRecipientId: rr.id },
             {
-              jobId: `send:${rr.id}`,
+              jobId: `send-${rr.id}`,
               attempts: 5,
               backoff: { type: "exponential", delay: 5_000 },
               removeOnComplete: true,
@@ -191,7 +216,27 @@ export class SegmentProcessor extends WorkerHost {
         cursor = page[page.length - 1]?.id;
       }
 
-      return { ok: true, total: rows.length, inserted, enqueued };
+      // If no recipients were enqueued (all were already sent), mark run as completed immediately
+      if (enqueued === 0) {
+        console.log(`No new recipients to send for run ${runId}, marking as COMPLETED`);
+        await this.prisma.singleSendRun.update({
+          where: { id: runId },
+          data: {
+            status: SingleSendRunStatus.COMPLETED,
+            completedAt: new Date(),
+            stats: {
+              total: rows.length,
+              inserted,
+              skippedDedup,
+              sent: 0,
+              failed: 0,
+              skipped: 0,
+            },
+          },
+        });
+      }
+
+      return { ok: true, total: rows.length, inserted, skippedDedup, enqueued };
     } finally {
       await adapter.close();
     }
