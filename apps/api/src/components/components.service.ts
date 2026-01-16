@@ -38,7 +38,7 @@ export class ComponentsService {
         type: dto.type,
         contentType: dto.contentType ?? ContentType.MJML,
         content: dto.content,
-        variables: dto.variables ?? [],
+        variables: (dto.variables ?? []) as any,
         previewHtml,
       },
     });
@@ -120,12 +120,16 @@ export class ComponentsService {
       );
     }
 
+    const updateData: any = {
+      ...dto,
+      previewHtml,
+    };
+    if (dto.variables !== undefined) {
+      updateData.variables = dto.variables as any;
+    }
     return this.prisma.component.update({
       where: { id },
-      data: {
-        ...dto,
-        previewHtml,
-      },
+      data: updateData,
     });
   }
 
@@ -223,9 +227,9 @@ export class ComponentsService {
         `;
         const result = mjml2html(wrappedMjml, { minify: false });
         return result.html;
-      } catch (error) {
+      } catch (error: any) {
         // Return raw content if MJML compilation fails
-        return `<div style="color: red;">MJML Error: ${error.message}</div><pre>${processedContent}</pre>`;
+        return `<div style="color: red;">MJML Error: ${error?.message ?? 'Unknown error'}</div><pre>${processedContent}</pre>`;
       }
     }
 

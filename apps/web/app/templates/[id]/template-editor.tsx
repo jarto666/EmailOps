@@ -2,7 +2,26 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import {
+  ArrowLeft,
+  RefreshCw,
+  Save,
+  Rocket,
+  Play,
+  CheckCircle2,
+  AlertCircle,
+  FileCode,
+  Code2,
+  Blocks,
+  X,
+} from "lucide-react";
 import { apiFetch } from "../../lib/api";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 
 type Template = {
   id: string;
@@ -13,8 +32,9 @@ type Template = {
 
 type TemplateVersion = {
   id: string;
-  name: string;
+  version: number;
   subject: string;
+  preheader?: string | null;
   mode: "RAW_HTML" | "RAW_MJML" | "UI_BUILDER";
   bodyHtml?: string | null;
   bodyMjml?: string | null;
@@ -22,6 +42,20 @@ type TemplateVersion = {
   active: boolean;
   createdAt: string;
 };
+
+function CategoryBadge({ category }: { category: string }) {
+  const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+    MARKETING: "default",
+    TRANSACTIONAL: "secondary",
+    BOTH: "outline",
+  };
+
+  return (
+    <Badge variant={variants[category] || "default"}>
+      {category}
+    </Badge>
+  );
+}
 
 export default function TemplateEditor({
   templateId,
@@ -35,6 +69,7 @@ export default function TemplateEditor({
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   const selected = useMemo(
     () => versions.find((v) => v.id === selectedVersionId) || null,
@@ -43,7 +78,6 @@ export default function TemplateEditor({
 
   // Editor state
   const [mode, setMode] = useState<TemplateVersion["mode"]>("RAW_HTML");
-  const [versionName, setVersionName] = useState("v1");
   const [subject, setSubject] = useState("Hello {{user.firstName}}");
   const [bodyHtml, setBodyHtml] = useState("<h1>Hi {{user.firstName}}</h1>");
   const [bodyMjml, setBodyMjml] = useState(
@@ -64,6 +98,7 @@ export default function TemplateEditor({
 
   async function loadAll() {
     setError(null);
+    setIsLoading(true);
     try {
       const t = await apiFetch<any>(`/templates/${templateId}`, {
         query: { workspaceId },
@@ -75,6 +110,8 @@ export default function TemplateEditor({
       setSelectedVersionId(active ? active.id : null);
     } catch (e: any) {
       setError(e?.message ?? String(e));
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -87,7 +124,6 @@ export default function TemplateEditor({
   useEffect(() => {
     if (!selected) return;
     setMode(selected.mode);
-    setVersionName(selected.name);
     setSubject(selected.subject);
     setBodyHtml(selected.bodyHtml || "");
     setBodyMjml(selected.bodyMjml || "");
@@ -101,7 +137,7 @@ export default function TemplateEditor({
     setSaving(true);
     setError(null);
     try {
-      const payload: any = { name: versionName, subject, mode };
+      const payload: any = { subject, mode };
       if (mode === "RAW_HTML") payload.bodyHtml = bodyHtml;
       if (mode === "RAW_MJML") payload.bodyMjml = bodyMjml;
       if (mode === "UI_BUILDER") payload.builderSchema = JSON.parse(builderSchema);
@@ -128,7 +164,7 @@ export default function TemplateEditor({
     setSaving(true);
     setError(null);
     try {
-      const payload: any = { name: versionName, subject, mode };
+      const payload: any = { subject, mode };
       if (mode === "RAW_HTML") payload.bodyHtml = bodyHtml;
       if (mode === "RAW_MJML") payload.bodyMjml = bodyMjml;
       if (mode === "UI_BUILDER") payload.builderSchema = JSON.parse(builderSchema);
@@ -181,7 +217,7 @@ export default function TemplateEditor({
         }
       );
       setPreviewHtml(out.html);
-      setSubject(out.subject); // optional: show rendered subject
+      setSubject(out.subject);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -189,218 +225,243 @@ export default function TemplateEditor({
     }
   }
 
+  if (isLoading) {
+    return (
+      <div className="animate-fade-in">
+        <div className="mb-8">
+          <div className="skeleton h-8 w-48 mb-2" />
+          <div className="skeleton h-4 w-72" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="skeleton h-[400px] rounded-lg" />
+          <div className="lg:col-span-2 skeleton h-[400px] rounded-lg" />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="animate-slide-up">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-8">
         <div>
-          <div className="text-sm text-gray-600">
-            <Link
-              className="text-indigo-700 hover:underline"
-              href={`/templates?workspaceId=${encodeURIComponent(workspaceId)}`}
-            >
-              ← Templates
-            </Link>
-          </div>
-          <h1 className="text-2xl font-bold mt-2">
+          <Link
+            href="/templates"
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Templates
+          </Link>
+          <h1 className="text-3xl font-bold mb-2">
             {template ? template.name : "Template"}
           </h1>
-          <div className="text-xs text-gray-600 mt-1">
-            <span className="font-mono">{template?.key ?? templateId}</span> ·{" "}
-            {template?.category ?? "—"} · workspace{" "}
-            <span className="font-mono">{workspaceId}</span>
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-sm text-muted-foreground">
+              {template?.key ?? templateId}
+            </span>
+            {template?.category && <CategoryBadge category={template.category} />}
           </div>
         </div>
-        <button className="text-sm border rounded px-3 py-2" onClick={loadAll}>
+        <Button variant="secondary" onClick={loadAll} disabled={saving}>
+          <RefreshCw className={`w-4 h-4 ${saving ? "animate-spin" : ""}`} />
           Refresh
-        </button>
+        </Button>
       </div>
 
-      {error ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm whitespace-pre-wrap">
-          {error}
-          <div className="mt-2">
-            <Link
-              className="text-indigo-700 hover:underline"
-              href={`/templates?workspaceId=${encodeURIComponent(workspaceId)}`}
-            >
-              Back to templates
-            </Link>
-          </div>
+      {/* Error Display */}
+      {error && (
+        <div className="flex items-center gap-3 p-4 mb-6 rounded-lg bg-destructive/10 border border-destructive/20">
+          <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
+          <span className="text-destructive flex-1">{error}</span>
+          <Button variant="ghost" size="icon" onClick={() => setError(null)}>
+            <X className="w-4 h-4" />
+          </Button>
         </div>
-      ) : null}
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white border rounded">
-          <div className="px-4 py-3 border-b flex items-center justify-between">
-            <h2 className="font-semibold">Versions</h2>
-            <span className="text-xs text-gray-500">{versions.length}</span>
-          </div>
-          <div className="divide-y">
+        {/* Versions Panel */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">Versions</CardTitle>
+              <Badge variant="secondary">{versions.length}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2">
             {versions.map((v) => (
               <button
                 key={v.id}
-                className={`w-full text-left px-4 py-3 hover:bg-gray-50 ${
-                  v.id === selectedVersionId ? "bg-indigo-50" : ""
+                className={`w-full text-left p-3 rounded-lg transition-all ${
+                  v.id === selectedVersionId
+                    ? "bg-primary/10 border border-primary/30"
+                    : "bg-secondary border border-transparent hover:border-border"
                 }`}
                 onClick={() => setSelectedVersionId(v.id)}
               >
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">
-                    {v.name}{" "}
-                    {v.active ? (
-                      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded ml-2">
-                        active
-                      </span>
-                    ) : null}
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">v{v.version}</span>
+                    {v.active && (
+                      <Badge variant="outline" className="text-xs bg-green-500/10 text-green-500 border-green-500/30">
+                        <CheckCircle2 className="w-3 h-3 mr-1" />
+                        Active
+                      </Badge>
+                    )}
                   </div>
-                  <div className="text-xs text-gray-500">{v.mode}</div>
+                  <span className="text-xs text-muted-foreground">{v.mode}</span>
                 </div>
-                <div className="text-xs text-gray-600 mt-1 truncate">
-                  {v.subject}
-                </div>
+                <p className="text-sm text-muted-foreground truncate">{v.subject}</p>
               </button>
             ))}
-            {versions.length === 0 ? (
-              <div className="px-4 py-8 text-sm text-gray-600">
-                No versions yet. Create one on the right.
+            {versions.length === 0 && (
+              <div className="text-center py-8">
+                <FileCode className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
+                <p className="text-sm text-muted-foreground">
+                  No versions yet. Create one using the editor.
+                </p>
               </div>
-            ) : null}
-          </div>
-        </div>
+            )}
+          </CardContent>
+        </Card>
 
-        <div className="bg-white border rounded lg:col-span-2">
-          <div className="px-4 py-3 border-b flex items-center justify-between">
-            <h2 className="font-semibold">Editor</h2>
-            <div className="flex gap-2">
-              <button
-                className="text-sm border rounded px-3 py-2 disabled:opacity-50"
-                onClick={selectedVersionId ? saveVersion : createVersion}
-                disabled={saving}
-              >
-                {selectedVersionId ? "Save" : "Create version"}
-              </button>
-              <button
-                className="text-sm bg-indigo-600 text-white rounded px-3 py-2 disabled:opacity-50"
-                onClick={publish}
-                disabled={!selectedVersionId || saving}
-              >
-                Publish
-              </button>
-            </div>
-          </div>
-
-          <div className="p-4 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <label className="text-sm">
-                <div className="text-gray-600 mb-1">Version name</div>
-                <input
-                  className="w-full border rounded px-3 py-2"
-                  value={versionName}
-                  onChange={(e) => setVersionName(e.target.value)}
-                />
-              </label>
-              <label className="text-sm md:col-span-2">
-                <div className="text-gray-600 mb-1">Subject</div>
-                <input
-                  className="w-full border rounded px-3 py-2"
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                />
-              </label>
-            </div>
-
-            <div className="flex gap-2 text-sm">
-              {(["RAW_HTML", "RAW_MJML", "UI_BUILDER"] as const).map((m) => (
-                <button
-                  key={m}
-                  className={`px-3 py-2 rounded border ${
-                    mode === m ? "bg-indigo-50 border-indigo-300" : ""
-                  }`}
-                  onClick={() => setMode(m)}
-                  type="button"
+        {/* Editor Panel */}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">Editor</CardTitle>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={selectedVersionId ? saveVersion : createVersion}
+                  disabled={saving}
                 >
-                  {m === "RAW_HTML"
-                    ? "Raw HTML"
-                    : m === "RAW_MJML"
-                      ? "Raw MJML"
-                      : "UI Builder"}
-                </button>
-              ))}
+                  {saving ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  {selectedVersionId ? "Save" : "Create Version"}
+                </Button>
+                <Button
+                  onClick={publish}
+                  disabled={!selectedVersionId || saving}
+                >
+                  <Rocket className="w-4 h-4" />
+                  Publish
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {/* Subject */}
+            <div className="space-y-2">
+              <Label>Subject Line</Label>
+              <Input
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Enter email subject..."
+              />
             </div>
 
-            {mode === "RAW_HTML" ? (
-              <label className="text-sm block">
-                <div className="text-gray-600 mb-1">HTML</div>
-                <textarea
-                  className="w-full border rounded px-3 py-2 font-mono text-xs h-56"
+            {/* Mode Selector */}
+            <div className="space-y-2">
+              <Label>Content Mode</Label>
+              <div className="flex gap-2">
+                {(["RAW_HTML", "RAW_MJML", "UI_BUILDER"] as const).map((m) => (
+                  <Button
+                    key={m}
+                    variant={mode === m ? "default" : "secondary"}
+                    onClick={() => setMode(m)}
+                    type="button"
+                  >
+                    {m === "RAW_HTML" && <Code2 className="w-4 h-4" />}
+                    {m === "RAW_MJML" && <FileCode className="w-4 h-4" />}
+                    {m === "UI_BUILDER" && <Blocks className="w-4 h-4" />}
+                    {m === "RAW_HTML" ? "HTML" : m === "RAW_MJML" ? "MJML" : "Builder"}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Content Editor */}
+            {mode === "RAW_HTML" && (
+              <div className="space-y-2">
+                <Label>HTML Content</Label>
+                <Textarea
+                  className="h-56 font-mono"
                   value={bodyHtml}
                   onChange={(e) => setBodyHtml(e.target.value)}
+                  placeholder="<html>...</html>"
                 />
-              </label>
-            ) : null}
+              </div>
+            )}
 
-            {mode === "RAW_MJML" ? (
-              <label className="text-sm block">
-                <div className="text-gray-600 mb-1">MJML</div>
-                <textarea
-                  className="w-full border rounded px-3 py-2 font-mono text-xs h-56"
+            {mode === "RAW_MJML" && (
+              <div className="space-y-2">
+                <Label>MJML Content</Label>
+                <Textarea
+                  className="h-56 font-mono"
                   value={bodyMjml}
                   onChange={(e) => setBodyMjml(e.target.value)}
+                  placeholder="<mjml>...</mjml>"
                 />
-              </label>
-            ) : null}
+              </div>
+            )}
 
-            {mode === "UI_BUILDER" ? (
-              <label className="text-sm block">
-                <div className="text-gray-600 mb-1">Builder schema (JSON)</div>
-                <textarea
-                  className="w-full border rounded px-3 py-2 font-mono text-xs h-56"
+            {mode === "UI_BUILDER" && (
+              <div className="space-y-2">
+                <Label>Builder Schema (JSON)</Label>
+                <Textarea
+                  className="h-56 font-mono"
                   value={builderSchema}
                   onChange={(e) => setBuilderSchema(e.target.value)}
                 />
-                <div className="text-xs text-gray-500 mt-1">
-                  Minimal schema: {"{ blocks: [{type:'text'|'button'|'divider', ...}] }"}
-                </div>
-              </label>
-            ) : null}
+                <p className="text-xs text-muted-foreground">
+                  Schema format: {"{ blocks: [{type:'text'|'button'|'divider', ...}] }"}
+                </p>
+              </div>
+            )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <div className="text-sm text-gray-600">Variables (JSON)</div>
-                  <button
-                    className="text-sm border rounded px-3 py-1.5 disabled:opacity-50"
+            {/* Preview Section */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-4 border-t border-border">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="mb-0">Test Variables (JSON)</Label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={renderPreview}
                     disabled={!selectedVersionId || saving}
                   >
-                    Render preview
-                  </button>
+                    <Play className="w-4 h-4" />
+                    Render
+                  </Button>
                 </div>
-                <textarea
-                  className="w-full border rounded px-3 py-2 font-mono text-xs h-40"
+                <Textarea
+                  className="h-40 font-mono"
                   value={variables}
                   onChange={(e) => setVariables(e.target.value)}
                 />
               </div>
 
-              <div>
-                <div className="text-sm text-gray-600 mb-1">Live preview</div>
-                <div className="border rounded overflow-hidden bg-white">
+              <div className="space-y-2">
+                <Label>Live Preview</Label>
+                <div className="rounded-lg overflow-hidden border border-border bg-white">
                   <iframe
                     title="preview"
                     className="w-full h-40"
-                    srcDoc={previewHtml || "<div></div>"}
+                    srcDoc={previewHtml || "<div style='padding:20px;color:#666;'>Preview will appear here</div>"}
                   />
                 </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Uses API `/render` (MJML compile + variable interpolation).
-                </div>
+                <p className="text-xs text-muted-foreground">
+                  Uses /render API for MJML compilation + variable interpolation
+                </p>
               </div>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
 }
-

@@ -6,40 +6,19 @@ import {
   Send,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
+  Zap,
   TrendingUp,
   Plus,
   ArrowRight,
   Clock,
-  Zap,
   Users,
   FileText,
+  AlertCircle,
 } from 'lucide-react';
-
-// Mock data - replace with real API calls
-const mockStats = {
-  totalSent: 124532,
-  deliveryRate: 98.2,
-  totalBounced: 1842,
-  activeCampaigns: 12,
-};
-
-const mockDailyData = [
-  { date: '2024-01-08', sent: 4200, delivered: 4100 },
-  { date: '2024-01-09', sent: 3800, delivered: 3720 },
-  { date: '2024-01-10', sent: 5100, delivered: 5000 },
-  { date: '2024-01-11', sent: 4600, delivered: 4500 },
-  { date: '2024-01-12', sent: 3200, delivered: 3150 },
-  { date: '2024-01-13', sent: 2800, delivered: 2750 },
-  { date: '2024-01-14', sent: 4900, delivered: 4800 },
-];
-
-const mockRecentCampaigns = [
-  { id: '1', name: 'Weekly Newsletter', status: 'COMPLETED', sent: 15420, delivered: 15200, createdAt: '2024-01-14' },
-  { id: '2', name: 'Low Credits Alert', status: 'ACTIVE', sent: 3200, delivered: 3150, createdAt: '2024-01-13' },
-  { id: '3', name: 'New Feature Announcement', status: 'DRAFT', sent: 0, delivered: 0, createdAt: '2024-01-12' },
-  { id: '4', name: 'Onboarding Day 7', status: 'ACTIVE', sent: 890, delivered: 875, createdAt: '2024-01-11' },
-];
+import { api, type OverviewStats, type DailyMetric, type RecentCampaign } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 
 function formatNumber(num: number): string {
   if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
@@ -48,18 +27,18 @@ function formatNumber(num: number): string {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const styles = {
-    COMPLETED: 'badge-success',
-    ACTIVE: 'badge-primary',
-    DRAFT: 'badge-default',
-    PAUSED: 'badge-warning',
-    FAILED: 'badge-danger',
+  const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+    COMPLETED: 'secondary',
+    ACTIVE: 'default',
+    DRAFT: 'outline',
+    PAUSED: 'outline',
+    FAILED: 'destructive',
   };
 
   return (
-    <span className={`badge ${styles[status as keyof typeof styles] || 'badge-default'}`}>
+    <Badge variant={variants[status] || 'outline'}>
       {status}
-    </span>
+    </Badge>
   );
 }
 
@@ -74,7 +53,7 @@ function StatCard({
   title: string;
   value: string | number;
   subtitle?: string;
-  icon: any;
+  icon: React.ComponentType<{ className?: string }>;
   trend?: number;
   color?: 'indigo' | 'emerald' | 'amber' | 'rose';
 }) {
@@ -86,8 +65,9 @@ function StatCard({
   };
 
   return (
-    <div className="stat-card group">
-      <div className="relative z-10">
+    <Card className="group relative overflow-hidden">
+      <div className="absolute -top-1/2 -right-1/2 w-full h-full bg-[radial-gradient(ellipse_at_center,rgba(99,102,241,0.15)_0%,transparent_70%)] pointer-events-none" />
+      <CardContent className="pt-6 relative z-10">
         <div className="flex items-start justify-between mb-4">
           <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${colors[color]} flex items-center justify-center transition-transform group-hover:scale-110`}>
             <Icon className="w-6 h-6" />
@@ -99,30 +79,38 @@ function StatCard({
             </div>
           )}
         </div>
-        <div className="text-3xl font-bold text-[var(--text-primary)] mb-1">
+        <div className="text-3xl font-bold mb-1">
           {typeof value === 'number' ? formatNumber(value) : value}
         </div>
-        <div className="text-sm text-[var(--text-secondary)]">{title}</div>
+        <div className="text-sm text-muted-foreground">{title}</div>
         {subtitle && (
-          <div className="text-xs text-[var(--text-muted)] mt-1">{subtitle}</div>
+          <div className="text-xs text-muted-foreground mt-1">{subtitle}</div>
         )}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
-function MiniChart({ data }: { data: typeof mockDailyData }) {
-  const maxValue = Math.max(...data.map(d => d.sent));
+function MiniChart({ data }: { data: DailyMetric[] }) {
+  if (data.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-16 text-muted-foreground text-sm">
+        No data yet
+      </div>
+    );
+  }
+
+  const maxValue = Math.max(...data.map(d => d.sent), 1);
 
   return (
     <div className="flex items-end gap-1 h-16">
-      {data.map((day, i) => {
+      {data.map((day) => {
         const height = (day.sent / maxValue) * 100;
         return (
           <div
             key={day.date}
             className="flex-1 bg-gradient-to-t from-indigo-500 to-purple-500 rounded-t opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
-            style={{ height: `${height}%` }}
+            style={{ height: `${Math.max(height, 2)}%` }}
             title={`${day.date}: ${day.sent.toLocaleString()} sent`}
           />
         );
@@ -138,92 +126,149 @@ function QuickAction({
   description,
 }: {
   href: string;
-  icon: any;
+  icon: React.ComponentType<{ className?: string }>;
   title: string;
   description: string;
 }) {
   return (
-    <Link href={href} className="card-glow group cursor-pointer">
-      <div className="flex items-start gap-4">
-        <div className="w-10 h-10 rounded-lg bg-[var(--bg-tertiary)] flex items-center justify-center text-[var(--text-muted)] group-hover:text-indigo-400 transition-colors">
-          <Icon className="w-5 h-5" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 text-[var(--text-primary)] font-medium group-hover:text-indigo-400 transition-colors">
-            {title}
-            <ArrowRight className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all" />
+    <Link href={href}>
+      <Card className="group cursor-pointer hover:border-primary/30 transition-all hover:-translate-y-0.5">
+        <CardContent>
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center text-muted-foreground group-hover:text-primary transition-colors">
+              <Icon className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 font-medium group-hover:text-primary transition-colors">
+                {title}
+                <ArrowRight className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all" />
+              </div>
+              <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
+            </div>
           </div>
-          <p className="text-sm text-[var(--text-secondary)] mt-0.5">{description}</p>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </Link>
   );
 }
 
 export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<OverviewStats | null>(null);
+  const [dailyData, setDailyData] = useState<DailyMetric[]>([]);
+  const [recentCampaigns, setRecentCampaigns] = useState<RecentCampaign[]>([]);
 
   useEffect(() => {
-    // Simulate loading
-    const timer = setTimeout(() => setIsLoading(false), 500);
-    return () => clearTimeout(timer);
+    async function fetchData() {
+      try {
+        const [overviewData, dailyMetrics, campaigns] = await Promise.all([
+          api.analytics.getOverview(),
+          api.analytics.getDailyMetrics(7),
+          api.analytics.getRecentCampaigns(5),
+        ]);
+
+        setStats(overviewData);
+        setDailyData(dailyMetrics);
+        setRecentCampaigns(campaigns);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchData();
   }, []);
 
   if (isLoading) {
     return (
       <div className="animate-fade-in">
-        <div className="page-header">
-          <div className="skeleton" style={{ height: '32px', width: '192px', marginBottom: '8px' }} />
-          <div className="skeleton" style={{ height: '16px', width: '288px' }} />
+        <div className="mb-8">
+          <div className="skeleton h-8 w-48 mb-2" />
+          <div className="skeleton h-4 w-72" />
         </div>
-        <div className="stats-grid">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           {[1, 2, 3, 4].map(i => (
-            <div key={i} className="skeleton" style={{ height: '160px', borderRadius: '16px' }} />
+            <div key={i} className="skeleton h-40 rounded-lg" />
           ))}
         </div>
       </div>
     );
   }
 
+  if (error) {
+    return (
+      <div className="animate-fade-in">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
+          <p className="text-muted-foreground">
+            Monitor your email performance and manage campaigns
+          </p>
+        </div>
+        <Card>
+          <CardContent className="py-16">
+            <div className="flex flex-col items-center justify-center text-center">
+              <AlertCircle className="w-16 h-16 text-amber-400 mb-4 opacity-50" />
+              <h3 className="text-lg font-semibold mb-2">Unable to load data</h3>
+              <p className="text-muted-foreground max-w-xs mb-2">{error}</p>
+              <p className="text-sm text-muted-foreground">
+                Make sure the API server is running on port 3300
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const displayStats = stats || {
+    totalSent: 0,
+    deliveryRate: 0,
+    totalBounced: 0,
+    activeCampaigns: 0,
+    totalDelivered: 0,
+    totalFailed: 0,
+    totalSegments: 0,
+    totalTemplates: 0,
+  };
+
   return (
     <div className="animate-slide-up">
       {/* Header */}
-      <div className="page-header">
-        <h1 className="page-title">Dashboard</h1>
-        <p className="page-description">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
+        <p className="text-muted-foreground">
           Monitor your email performance and manage campaigns
         </p>
       </div>
 
       {/* Stats Grid */}
-      <div className="stats-grid">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard
           title="Total Emails Sent"
-          value={mockStats.totalSent}
+          value={displayStats.totalSent}
           subtitle="Last 30 days"
           icon={Send}
-          trend={12}
           color="indigo"
         />
         <StatCard
           title="Delivery Rate"
-          value={`${mockStats.deliveryRate}%`}
+          value={displayStats.totalSent > 0 ? `${displayStats.deliveryRate.toFixed(1)}%` : '-'}
           subtitle="Industry avg: 96%"
           icon={CheckCircle2}
-          trend={2}
           color="emerald"
         />
         <StatCard
           title="Total Bounced"
-          value={mockStats.totalBounced}
+          value={displayStats.totalBounced}
           subtitle="Hard + Soft bounces"
           icon={XCircle}
-          trend={-5}
           color="rose"
         />
         <StatCard
           title="Active Campaigns"
-          value={mockStats.activeCampaigns}
+          value={displayStats.activeCampaigns}
           subtitle="Currently running"
           icon={Zap}
           color="amber"
@@ -231,41 +276,36 @@ export default function DashboardPage() {
       </div>
 
       {/* Chart & Recent Activity */}
-      <div className="dashboard-grid">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         {/* Chart Section */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Send Volume</h2>
-              <p className="text-sm text-[var(--text-secondary)]">Daily emails sent this week</p>
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Send Volume</CardTitle>
+            <p className="text-sm text-muted-foreground">Daily emails sent this week</p>
+          </CardHeader>
+          <CardContent>
+            <div className="h-48">
+              <MiniChart data={dailyData} />
             </div>
-            <select className="select w-auto text-sm py-1.5 px-3">
-              <option>Last 7 days</option>
-              <option>Last 30 days</option>
-              <option>Last 90 days</option>
-            </select>
-          </div>
-          <div className="h-48">
-            <MiniChart data={mockDailyData} />
-          </div>
-          <div className="flex items-center justify-between mt-4 pt-4 border-t border-[var(--border-default)]">
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500" />
-                <span className="text-sm text-[var(--text-secondary)]">Emails Sent</span>
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500" />
+                  <span className="text-sm text-muted-foreground">Emails Sent</span>
+                </div>
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Total: {dailyData.reduce((acc, d) => acc + d.sent, 0).toLocaleString()}
               </div>
             </div>
-            <div className="text-sm text-[var(--text-muted)]">
-              Total: {mockDailyData.reduce((acc, d) => acc + d.sent, 0).toLocaleString()}
-            </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* Quick Actions */}
-        <div className="quick-actions">
-          <h2 className="quick-actions-title">Quick Actions</h2>
+        <div className="flex flex-col gap-4">
+          <h2 className="text-lg font-semibold">Quick Actions</h2>
           <QuickAction
-            href="/campaigns/new"
+            href="/campaigns"
             icon={Plus}
             title="New Campaign"
             description="Create a new single send campaign"
@@ -286,87 +326,88 @@ export default function DashboardPage() {
       </div>
 
       {/* Recent Campaigns */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Recent Campaigns</h2>
-            <p className="text-sm text-[var(--text-secondary)]">Your latest single sends</p>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Recent Campaigns</CardTitle>
+              <p className="text-sm text-muted-foreground">Your latest single sends</p>
+            </div>
+            <Button variant="secondary" asChild>
+              <Link href="/campaigns">
+                View All
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </Button>
           </div>
-          <Link href="/campaigns" className="btn btn-secondary text-sm">
-            View All
-            <ArrowRight className="w-4 h-4" />
-          </Link>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Campaign</th>
-                <th>Status</th>
-                <th>Sent</th>
-                <th>Delivered</th>
-                <th>Rate</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mockRecentCampaigns.map((campaign) => {
-                const rate = campaign.sent > 0
-                  ? ((campaign.delivered / campaign.sent) * 100).toFixed(1)
-                  : '-';
-
-                return (
-                  <tr key={campaign.id}>
-                    <td>
-                      <Link
-                        href={`/campaigns/${campaign.id}`}
-                        className="font-medium text-[var(--text-primary)] hover:text-indigo-400 transition-colors"
-                      >
-                        {campaign.name}
-                      </Link>
-                    </td>
-                    <td>
-                      <StatusBadge status={campaign.status} />
-                    </td>
-                    <td className="text-[var(--text-secondary)]">
-                      {campaign.sent.toLocaleString()}
-                    </td>
-                    <td className="text-[var(--text-secondary)]">
-                      {campaign.delivered.toLocaleString()}
-                    </td>
-                    <td>
-                      <span className={campaign.sent > 0 && parseFloat(rate) >= 98 ? 'text-emerald-400' : 'text-[var(--text-secondary)]'}>
-                        {rate}{campaign.sent > 0 ? '%' : ''}
-                      </span>
-                    </td>
-                    <td className="text-[var(--text-muted)]">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4" />
-                        {new Date(campaign.createdAt).toLocaleDateString()}
-                      </div>
-                    </td>
+        </CardHeader>
+        <CardContent>
+          {recentCampaigns.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wide">Campaign</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wide">Sent</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wide">Rate</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Run</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {mockRecentCampaigns.length === 0 && (
-          <div className="empty-state">
-            <Send className="empty-state-icon" />
-            <h3 className="empty-state-title">No campaigns yet</h3>
-            <p className="empty-state-description">
-              Create your first campaign to start sending emails
-            </p>
-            <Link href="/campaigns/new" className="btn btn-primary">
-              <Plus className="w-4 h-4" />
-              Create Campaign
-            </Link>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {recentCampaigns.map((campaign) => (
+                    <tr key={campaign.id} className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+                      <td className="py-4 px-4">
+                        <Link
+                          href={`/campaigns/${campaign.id}`}
+                          className="font-medium hover:text-primary transition-colors"
+                        >
+                          {campaign.name}
+                        </Link>
+                      </td>
+                      <td className="py-4 px-4">
+                        <StatusBadge status={campaign.status} />
+                      </td>
+                      <td className="py-4 px-4 text-muted-foreground">
+                        {campaign.totalSent.toLocaleString()}
+                      </td>
+                      <td className="py-4 px-4">
+                        <span className={campaign.deliveryRate >= 98 ? 'text-emerald-400' : 'text-muted-foreground'}>
+                          {campaign.deliveryRate > 0 ? `${campaign.deliveryRate.toFixed(1)}%` : '-'}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 text-muted-foreground">
+                        {campaign.lastRunAt ? (
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4" />
+                            {new Date(campaign.lastRunAt).toLocaleDateString()}
+                          </div>
+                        ) : (
+                          <span>Never</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <Send className="w-16 h-16 text-muted-foreground mb-4 opacity-50" />
+              <h3 className="text-lg font-semibold mb-2">No campaigns yet</h3>
+              <p className="text-muted-foreground max-w-xs mb-4">
+                Create your first campaign to start sending emails
+              </p>
+              <Button asChild>
+                <Link href="/campaigns">
+                  <Plus className="w-4 h-4" />
+                  Create Campaign
+                </Link>
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

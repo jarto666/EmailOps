@@ -11,6 +11,6 @@ export default async function TemplatePage({
 }) {
   const p = await Promise.resolve(params);
   const sp = await Promise.resolve(searchParams);
-  const workspaceId = sp.workspaceId || "default";
+  const workspaceId = sp.workspaceId || "ws_default";
   return <TemplateEditor templateId={p.id} workspaceId={workspaceId} />;
 }

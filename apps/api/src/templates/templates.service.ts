@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { TemplateCategory } from "@email-ops/core";
+import { AuthoringMode, TemplateCategory } from "@email-ops/core";
 import { PrismaService } from "../prisma/prisma.service";
 
 @Injectable()
@@ -29,14 +29,29 @@ export class TemplatesService {
         create: { id: input.workspaceId, name: "Default Workspace" },
       });
 
-      return await this.prisma.template.create({
+      // Create template with initial version in a transaction
+      const template = await this.prisma.template.create({
         data: {
           workspaceId: input.workspaceId,
           key: input.key,
           name: input.name,
           category: input.category,
+          versions: {
+            create: {
+              version: 1,
+              subject: `Hello from ${input.name}`,
+              mode: AuthoringMode.RAW_HTML,
+              bodyHtml: `<h1>Hello {{user.firstName}}</h1>\n<p>This is your ${input.name} template.</p>`,
+              active: true,
+            },
+          },
+        },
+        include: {
+          versions: true,
         },
       });
+
+      return template;
     } catch (e: any) {
       // Prisma FK violation / constraint errors are too opaque; surface a clearer message.
       if (

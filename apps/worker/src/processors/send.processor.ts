@@ -177,7 +177,6 @@ export class SendProcessor extends WorkerHost {
     const send = await this.prisma.send.upsert({
       where: { idempotencyKey },
       create: {
-        workspaceId: singleSend.workspaceId,
         singleSendRecipientId,
         idempotencyKey,
         status: "QUEUED",
@@ -302,7 +301,6 @@ export class SendProcessor extends WorkerHost {
     const send = await this.prisma.send.upsert({
       where: { idempotencyKey },
       create: {
-        workspaceId,
         idempotencyKey,
         status: "QUEUED",
         attempts: 1,

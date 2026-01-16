@@ -10,21 +10,7 @@ import {
 import { Type } from 'class-transformer';
 import { ComponentType, ContentType } from '@prisma/client';
 
-class ComponentVariableDto {
-  @IsString()
-  name: string;
-
-  @IsString()
-  type: string;
-
-  @IsOptional()
-  @IsString()
-  defaultValue?: string;
-
-  @IsOptional()
-  @IsString()
-  description?: string;
-}
+import { ComponentVariableDto } from './create-component.dto';
 
 export class UpdateComponentDto {
   @IsOptional()

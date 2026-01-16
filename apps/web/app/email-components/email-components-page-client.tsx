@@ -17,80 +17,19 @@ import {
   Type,
   Image,
   Square,
+  AlertCircle,
 } from 'lucide-react';
-
-// Mock data
-const mockComponents = [
-  {
-    id: '1',
-    name: 'brand-header',
-    displayName: 'Brand Header',
-    type: 'HEADER',
-    contentType: 'MJML',
-    description: 'Standard header with logo and navigation',
-    usageCount: 8,
-    variables: ['logoUrl', 'companyName'],
-    previewHtml: '<div style="background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 20px; text-align: center; color: white;">Brand Header Preview</div>',
-    createdAt: '2024-01-01',
-  },
-  {
-    id: '2',
-    name: 'footer-links',
-    displayName: 'Footer with Links',
-    type: 'FOOTER',
-    contentType: 'MJML',
-    description: 'Footer with social links and unsubscribe',
-    usageCount: 12,
-    variables: ['unsubscribeUrl', 'socialLinks'],
-    previewHtml: '<div style="background: #1a1a2e; padding: 20px; text-align: center; color: #888;">Footer Preview</div>',
-    createdAt: '2024-01-02',
-  },
-  {
-    id: '3',
-    name: 'cta-button',
-    displayName: 'CTA Button',
-    type: 'BUTTON',
-    contentType: 'MJML',
-    description: 'Primary call-to-action button',
-    usageCount: 24,
-    variables: ['buttonText', 'buttonUrl', 'buttonColor'],
-    previewHtml: '<div style="text-align: center; padding: 20px;"><span style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; padding: 12px 32px; border-radius: 8px; display: inline-block;">Click Here</span></div>',
-    createdAt: '2024-01-03',
-  },
-  {
-    id: '4',
-    name: 'product-card',
-    displayName: 'Product Card',
-    type: 'SECTION',
-    contentType: 'MJML',
-    description: 'Product showcase with image and details',
-    usageCount: 6,
-    variables: ['productName', 'productImage', 'productPrice', 'productUrl'],
-    previewHtml: '<div style="background: #0a0a0f; border: 1px solid #1e1e2e; border-radius: 12px; padding: 20px; text-align: center; color: white;">Product Card Preview</div>',
-    createdAt: '2024-01-05',
-  },
-  {
-    id: '5',
-    name: 'divider-line',
-    displayName: 'Divider Line',
-    type: 'DIVIDER',
-    contentType: 'MJML',
-    description: 'Simple horizontal divider',
-    usageCount: 15,
-    variables: ['color', 'width'],
-    previewHtml: '<div style="padding: 20px;"><hr style="border: none; border-top: 1px solid #2a2a3e;" /></div>',
-    createdAt: '2024-01-04',
-  },
-];
+import { api } from '@/lib/api';
+import type { Component } from '@/lib/api';
 
 function ComponentTypeBadge({ type }: { type: string }) {
   const styles: Record<string, { class: string; icon: any }> = {
     HEADER: { class: 'badge-primary', icon: Type },
     FOOTER: { class: 'badge-default', icon: Square },
     BUTTON: { class: 'badge-success', icon: Square },
-    SECTION: { class: 'badge-warning', icon: Layers },
+    CARD: { class: 'badge-warning', icon: Layers },
     DIVIDER: { class: 'badge-default', icon: Square },
-    IMAGE: { class: 'badge-primary', icon: Image },
+    SNIPPET: { class: 'badge-primary', icon: Code },
   };
 
   const style = styles[type] || { class: 'badge-default', icon: Layers };
@@ -115,27 +54,88 @@ const defaultMjmlContent = `<mj-section>
 function CreateComponentModal({
   isOpen,
   onClose,
+  onComponentCreated,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  onComponentCreated: () => void;
 }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [type, setType] = useState<Component['type']>('HEADER');
+  const [contentType, setContentType] = useState<Component['contentType']>('MJML');
   const [content, setContent] = useState(defaultMjmlContent);
   const [variables, setVariables] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const resetForm = () => {
+    setName('');
+    setDescription('');
+    setType('HEADER');
+    setContentType('MJML');
+    setContent(defaultMjmlContent);
+    setVariables('');
+    setError(null);
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+
+    try {
+      const variablesArray = variables
+        .split(',')
+        .map((v) => v.trim())
+        .filter((v) => v.length > 0)
+        .map((v) => ({ name: v, type: 'string' }));
+
+      await api.components.create({
+        name,
+        description,
+        type,
+        contentType,
+        content,
+        variables: variablesArray,
+      });
+
+      resetForm();
+      onComponentCreated();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create component');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleClose} />
       <div className="relative bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-2xl w-full max-w-3xl p-6 shadow-2xl animate-slide-up max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-semibold text-[var(--text-primary)]">Create Component</h2>
-          <button onClick={onClose} className="btn btn-ghost p-2">
+          <button onClick={handleClose} className="btn btn-ghost p-2">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form className="space-y-5">
+        {error && (
+          <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center gap-2 text-rose-400">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span className="text-sm">{error}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div className="form-grid">
             <div>
               <label className="label">Component Name</label>
@@ -143,17 +143,22 @@ function CreateComponentModal({
                 type="text"
                 className="input font-mono"
                 placeholder="brand-header"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
               />
               <p className="text-xs text-[var(--text-muted)] mt-1">
                 Unique identifier for this component
               </p>
             </div>
             <div>
-              <label className="label">Display Name</label>
+              <label className="label">Description</label>
               <input
                 type="text"
                 className="input"
-                placeholder="Brand Header"
+                placeholder="Brief description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
               />
             </div>
           </div>
@@ -161,31 +166,30 @@ function CreateComponentModal({
           <div className="form-grid">
             <div>
               <label className="label">Type</label>
-              <select className="select">
+              <select
+                className="select"
+                value={type}
+                onChange={(e) => setType(e.target.value as Component['type'])}
+              >
                 <option value="HEADER">Header</option>
                 <option value="FOOTER">Footer</option>
                 <option value="BUTTON">Button</option>
-                <option value="SECTION">Section</option>
+                <option value="CARD">Card</option>
                 <option value="DIVIDER">Divider</option>
-                <option value="IMAGE">Image</option>
+                <option value="SNIPPET">Snippet</option>
               </select>
             </div>
             <div>
               <label className="label">Content Type</label>
-              <select className="select">
+              <select
+                className="select"
+                value={contentType}
+                onChange={(e) => setContentType(e.target.value as Component['contentType'])}
+              >
                 <option value="MJML">MJML</option>
                 <option value="HTML">HTML</option>
               </select>
             </div>
-          </div>
-
-          <div>
-            <label className="label">Description</label>
-            <input
-              type="text"
-              className="input"
-              placeholder="Brief description of this component"
-            />
           </div>
 
           <div>
@@ -204,10 +208,10 @@ function CreateComponentModal({
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="label mb-0">MJML Content</label>
+              <label className="label mb-0">{contentType} Content</label>
               <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                 <Code className="w-4 h-4" />
-                MJML
+                {contentType}
               </div>
             </div>
             <textarea
@@ -215,6 +219,7 @@ function CreateComponentModal({
               value={content}
               onChange={(e) => setContent(e.target.value)}
               spellCheck={false}
+              required
             />
             <p className="text-xs text-[var(--text-muted)] mt-1">
               Use {'{{variableName}}'} syntax for dynamic values
@@ -222,11 +227,11 @@ function CreateComponentModal({
           </div>
 
           <div className="flex justify-end gap-3 pt-4">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
+            <button type="button" onClick={handleClose} className="btn btn-secondary" disabled={isSubmitting}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Create Component
+            <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+              {isSubmitting ? 'Creating...' : 'Create Component'}
             </button>
           </div>
         </form>
@@ -239,17 +244,48 @@ export default function EmailComponentsPageClient() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [components, setComponents] = useState<Component[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const fetchComponents = async () => {
+    try {
+      setError(null);
+      const data = await api.components.list();
+      setComponents(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch components');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 500);
-    return () => clearTimeout(timer);
+    fetchComponents();
   }, []);
 
-  const filteredComponents = mockComponents.filter((c) => {
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this component?')) return;
+
+    setDeletingId(id);
+    try {
+      await api.components.delete(id);
+      setComponents((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete component');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleComponentCreated = () => {
+    fetchComponents();
+  };
+
+  const filteredComponents = components.filter((c) => {
     const matchesSearch =
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.description?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesType = typeFilter === 'all' || c.type === typeFilter;
     return matchesSearch && matchesType;
@@ -286,6 +322,20 @@ export default function EmailComponentsPageClient() {
           New Component
         </button>
       </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center gap-3 text-rose-400">
+          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <span>{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="ml-auto btn btn-ghost p-1"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Info Card */}
       <div className="card-glow mb-8">
@@ -328,8 +378,9 @@ export default function EmailComponentsPageClient() {
           <option value="HEADER">Header</option>
           <option value="FOOTER">Footer</option>
           <option value="BUTTON">Button</option>
-          <option value="SECTION">Section</option>
+          <option value="CARD">Card</option>
           <option value="DIVIDER">Divider</option>
+          <option value="SNIPPET">Snippet</option>
         </select>
       </div>
 
@@ -347,10 +398,10 @@ export default function EmailComponentsPageClient() {
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <h3 className="text-lg font-semibold text-[var(--text-primary)] hover:text-indigo-400 transition-colors cursor-pointer">
-                    {component.displayName}
+                    {component.name}
                   </h3>
                   <p className="text-sm text-[var(--text-muted)] font-mono">
-                    {component.name}
+                    {component.type.toLowerCase()}
                   </p>
                 </div>
                 <div className="relative">
@@ -378,10 +429,10 @@ export default function EmailComponentsPageClient() {
                 <div className="flex flex-wrap gap-1 mb-4">
                   {component.variables.map((v) => (
                     <span
-                      key={v}
+                      key={v.name}
                       className="text-xs bg-[var(--bg-tertiary)] text-[var(--text-muted)] px-2 py-0.5 rounded font-mono"
                     >
-                      {'{{'}{v}{'}}'}
+                      {'{{'}{v.name}{'}}'}
                     </span>
                   ))}
                 </div>
@@ -389,7 +440,7 @@ export default function EmailComponentsPageClient() {
 
               <div className="flex items-center justify-between pt-4 border-t border-[var(--border-default)]">
                 <div className="text-sm text-[var(--text-muted)]">
-                  Used in {component.usageCount} templates
+                  {new Date(component.createdAt).toLocaleDateString()}
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button className="btn btn-ghost p-2">
@@ -401,8 +452,12 @@ export default function EmailComponentsPageClient() {
                   <button className="btn btn-ghost p-2">
                     <Edit2 className="w-4 h-4" />
                   </button>
-                  <button className="btn btn-ghost p-2 text-rose-400">
-                    <Trash2 className="w-4 h-4" />
+                  <button
+                    className="btn btn-ghost p-2 text-rose-400"
+                    onClick={() => handleDelete(component.id)}
+                    disabled={deletingId === component.id}
+                  >
+                    <Trash2 className={`w-4 h-4 ${deletingId === component.id ? 'animate-pulse' : ''}`} />
                   </button>
                 </div>
               </div>
@@ -429,7 +484,11 @@ export default function EmailComponentsPageClient() {
         </div>
       )}
 
-      <CreateComponentModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+      <CreateComponentModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onComponentCreated={handleComponentCreated}
+      />
     </div>
   );
 }

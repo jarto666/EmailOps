@@ -17,51 +17,8 @@ import {
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react';
-
-// Mock data
-const mockConnectors = [
-  { id: '1', name: 'Production DB', type: 'POSTGRES' },
-  { id: '2', name: 'Analytics', type: 'BIGQUERY' },
-];
-
-const mockSegments = [
-  {
-    id: '1',
-    name: 'Active Users (30d)',
-    description: 'Users who logged in within the last 30 days',
-    dataConnectorId: '1',
-    dataConnector: { name: 'Production DB', type: 'POSTGRES' },
-    sqlQuery: `SELECT user_id as recipient_id, email, jsonb_build_object('name', first_name) as vars
-FROM users
-WHERE last_login_at > NOW() - INTERVAL '30 days'`,
-    lastRunCount: 45230,
-    lastRunAt: '2024-01-14T10:30:00Z',
-  },
-  {
-    id: '2',
-    name: 'Low Credit Users',
-    description: 'Users with credits below threshold',
-    dataConnectorId: '1',
-    dataConnector: { name: 'Production DB', type: 'POSTGRES' },
-    sqlQuery: `SELECT user_id as recipient_id, email, jsonb_build_object('credits', credits) as vars
-FROM users
-WHERE credits < 100`,
-    lastRunCount: 3420,
-    lastRunAt: '2024-01-13T14:20:00Z',
-  },
-  {
-    id: '3',
-    name: 'Premium Subscribers',
-    description: 'Active premium plan subscribers',
-    dataConnectorId: '2',
-    dataConnector: { name: 'Analytics', type: 'BIGQUERY' },
-    sqlQuery: `SELECT user_id as recipient_id, email, STRUCT(plan_name, renewal_date) as vars
-FROM subscriptions
-WHERE plan_type = 'premium' AND status = 'active'`,
-    lastRunCount: 12890,
-    lastRunAt: '2024-01-14T08:00:00Z',
-  },
-];
+import { api } from '@/lib/api';
+import type { Segment, DataConnector } from '@/lib/api';
 
 const defaultSqlQuery = `SELECT
   user_id::text AS recipient_id,
@@ -76,19 +33,59 @@ function CreateSegmentModal({
   isOpen,
   onClose,
   connectors,
+  onCreated,
 }: {
   isOpen: boolean;
   onClose: () => void;
-  connectors: typeof mockConnectors;
+  connectors: DataConnector[];
+  onCreated: (segment: Segment) => void;
 }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [dataConnectorId, setDataConnectorId] = useState('');
   const [sqlQuery, setSqlQuery] = useState(defaultSqlQuery);
   const [testResult, setTestResult] = useState<{ success: boolean; count?: number; error?: string } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Set default connector when connectors load
+  useEffect(() => {
+    if (connectors.length > 0 && !dataConnectorId) {
+      setDataConnectorId(connectors[0].id);
+    }
+  }, [connectors, dataConnectorId]);
 
   if (!isOpen) return null;
 
   const handleTest = () => {
     // Simulate test
     setTestResult({ success: true, count: 1542 });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+
+    try {
+      const newSegment = await api.segments.create({
+        name,
+        description,
+        sqlQuery,
+        dataConnectorId,
+      });
+      onCreated(newSegment);
+      onClose();
+      // Reset form
+      setName('');
+      setDescription('');
+      setSqlQuery(defaultSqlQuery);
+      setTestResult(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create segment');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -102,7 +99,7 @@ function CreateSegmentModal({
           </button>
         </div>
 
-        <form className="space-y-5">
+        <form className="space-y-5" onSubmit={handleSubmit}>
           <div className="form-grid">
             <div>
               <label className="label">Name</label>
@@ -110,11 +107,19 @@ function CreateSegmentModal({
                 type="text"
                 className="input"
                 placeholder="e.g., Active Users (30d)"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
               />
             </div>
             <div>
               <label className="label">Data Connector</label>
-              <select className="select">
+              <select
+                className="select"
+                value={dataConnectorId}
+                onChange={(e) => setDataConnectorId(e.target.value)}
+                required
+              >
                 {connectors.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name} ({c.type})
@@ -130,6 +135,8 @@ function CreateSegmentModal({
               type="text"
               className="input"
               placeholder="Brief description of this segment"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
             />
           </div>
 
@@ -147,6 +154,7 @@ function CreateSegmentModal({
                 value={sqlQuery}
                 onChange={(e) => setSqlQuery(e.target.value)}
                 spellCheck={false}
+                required
               />
               <div className="absolute bottom-3 left-3 flex items-center gap-2">
                 <Code className="w-4 h-4 text-[var(--text-muted)]" />
@@ -184,12 +192,19 @@ function CreateSegmentModal({
             </div>
           )}
 
+          {error && (
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-rose-500/10 border border-rose-500/20">
+              <AlertCircle className="w-5 h-5 text-rose-400" />
+              <span className="text-rose-400">{error}</span>
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-4">
             <button type="button" onClick={onClose} className="btn btn-secondary">
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Create Segment
+            <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+              {isSubmitting ? 'Creating...' : 'Create Segment'}
             </button>
           </div>
         </form>
@@ -201,14 +216,52 @@ function CreateSegmentModal({
 export default function SegmentsPageClient() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [segments, setSegments] = useState<Segment[]>([]);
+  const [dataConnectors, setDataConnectors] = useState<DataConnector[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 500);
-    return () => clearTimeout(timer);
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const [segmentsData, connectorsData] = await Promise.all([
+          api.segments.list(),
+          api.dataConnectors.list(),
+        ]);
+        setSegments(segmentsData);
+        setDataConnectors(connectorsData);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load data');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
   }, []);
 
-  const filteredSegments = mockSegments.filter(
+  const handleSegmentCreated = (newSegment: Segment) => {
+    setSegments((prev) => [newSegment, ...prev]);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this segment?')) return;
+
+    try {
+      setDeletingId(id);
+      await api.segments.delete(id);
+      setSegments((prev) => prev.filter((s) => s.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete segment');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const filteredSegments = segments.filter(
     (s) =>
       s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       s.description?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -222,6 +275,34 @@ export default function SegmentsPageClient() {
           <div className="skeleton" style={{ height: '16px', width: '288px' }} />
         </div>
         <div className="skeleton" style={{ height: '256px', borderRadius: '16px' }} />
+      </div>
+    );
+  }
+
+  if (error && segments.length === 0) {
+    return (
+      <div className="animate-slide-up">
+        <div className="flex-between mb-lg">
+          <div>
+            <h1 className="page-title">Segments</h1>
+            <p className="page-description">
+              Define audiences with SQL queries for targeted campaigns
+            </p>
+          </div>
+        </div>
+        <div className="card">
+          <div className="flex items-center gap-3 p-4 rounded-lg bg-rose-500/10 border border-rose-500/20">
+            <AlertCircle className="w-5 h-5 text-rose-400" />
+            <span className="text-rose-400">{error}</span>
+            <button
+              onClick={() => window.location.reload()}
+              className="btn btn-ghost ml-auto"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Retry
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -241,6 +322,20 @@ export default function SegmentsPageClient() {
           New Segment
         </button>
       </div>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="mb-6 flex items-center gap-3 p-4 rounded-lg bg-rose-500/10 border border-rose-500/20">
+          <AlertCircle className="w-5 h-5 text-rose-400" />
+          <span className="text-rose-400">{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="btn btn-ghost ml-auto p-1"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Info Card */}
       <div className="card-glow mb-8">
@@ -301,12 +396,9 @@ export default function SegmentsPageClient() {
                         <Database className="w-3 h-3 mr-1" />
                         {segment.dataConnector?.name}
                       </span>
-                      <span className="text-sm text-[var(--text-muted)]">
-                        {segment.lastRunCount?.toLocaleString()} recipients
-                      </span>
-                      {segment.lastRunAt && (
+                      {segment.createdAt && (
                         <span className="text-sm text-[var(--text-muted)]">
-                          Last run: {new Date(segment.lastRunAt).toLocaleDateString()}
+                          Created: {new Date(segment.createdAt).toLocaleDateString()}
                         </span>
                       )}
                     </div>
@@ -319,8 +411,16 @@ export default function SegmentsPageClient() {
                   <button className="btn btn-ghost p-2">
                     <Edit2 className="w-4 h-4" />
                   </button>
-                  <button className="btn btn-ghost p-2 text-rose-400">
-                    <Trash2 className="w-4 h-4" />
+                  <button
+                    className="btn btn-ghost p-2 text-rose-400"
+                    onClick={() => handleDelete(segment.id)}
+                    disabled={deletingId === segment.id}
+                  >
+                    {deletingId === segment.id ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
                   </button>
                 </div>
               </div>
@@ -357,7 +457,8 @@ export default function SegmentsPageClient() {
       <CreateSegmentModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        connectors={mockConnectors}
+        connectors={dataConnectors}
+        onCreated={handleSegmentCreated}
       />
     </div>
   );

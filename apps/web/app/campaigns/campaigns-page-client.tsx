@@ -16,99 +16,11 @@ import {
   MoreVertical,
   Edit2,
   Trash2,
-  CheckCircle2,
-  AlertCircle,
   Calendar,
   Users,
+  AlertCircle,
 } from 'lucide-react';
-
-// Mock data
-const mockCampaignGroups = [
-  { id: '1', name: 'Activation Emails' },
-  { id: '2', name: 'Billing Alerts' },
-  { id: '3', name: 'Marketing' },
-];
-
-const mockTemplates = [
-  { id: '1', name: 'Welcome Email', key: 'welcome-email' },
-  { id: '2', name: 'Weekly Digest', key: 'weekly-digest' },
-  { id: '3', name: 'Low Credits Alert', key: 'low-credits-alert' },
-];
-
-const mockSegments = [
-  { id: '1', name: 'Active Users (30d)' },
-  { id: '2', name: 'Low Credit Users' },
-  { id: '3', name: 'Premium Subscribers' },
-];
-
-const mockSenderProfiles = [
-  { id: '1', fromEmail: 'news@company.com', fromName: 'Company News' },
-  { id: '2', fromEmail: 'alerts@company.com', fromName: 'Company Alerts' },
-];
-
-const mockCampaigns = [
-  {
-    id: '1',
-    name: 'Weekly Newsletter',
-    description: 'Our weekly product updates and tips',
-    status: 'ACTIVE',
-    scheduleType: 'CRON',
-    cronExpression: '0 9 * * MON',
-    priority: 50,
-    template: { id: '2', name: 'Weekly Digest', key: 'weekly-digest' },
-    segment: { id: '1', name: 'Active Users (30d)' },
-    senderProfile: { id: '1', fromEmail: 'news@company.com', fromName: 'Company News' },
-    campaignGroup: { id: '3', name: 'Marketing' },
-    runs: [
-      { id: 'r1', status: 'COMPLETED', stats: { total: 15420, sent: 15200, failed: 12, skipped: 208 }, createdAt: '2024-01-14T09:00:00Z' },
-      { id: 'r2', status: 'COMPLETED', stats: { total: 14890, sent: 14700, failed: 8, skipped: 182 }, createdAt: '2024-01-07T09:00:00Z' },
-    ],
-  },
-  {
-    id: '2',
-    name: 'Low Credits Alert',
-    description: 'Alert users when their credits are running low',
-    status: 'ACTIVE',
-    scheduleType: 'CRON',
-    cronExpression: '0 10 * * *',
-    priority: 90,
-    template: { id: '3', name: 'Low Credits Alert', key: 'low-credits-alert' },
-    segment: { id: '2', name: 'Low Credit Users' },
-    senderProfile: { id: '2', fromEmail: 'alerts@company.com', fromName: 'Company Alerts' },
-    campaignGroup: { id: '2', name: 'Billing Alerts' },
-    runs: [
-      { id: 'r3', status: 'COMPLETED', stats: { total: 3200, sent: 3150, failed: 5, skipped: 45 }, createdAt: '2024-01-14T10:00:00Z' },
-    ],
-  },
-  {
-    id: '3',
-    name: 'Welcome Series - Day 1',
-    description: 'First email in the welcome series',
-    status: 'DRAFT',
-    scheduleType: 'MANUAL',
-    priority: 100,
-    template: { id: '1', name: 'Welcome Email', key: 'welcome-email' },
-    segment: { id: '1', name: 'Active Users (30d)' },
-    senderProfile: { id: '1', fromEmail: 'news@company.com', fromName: 'Company News' },
-    campaignGroup: { id: '1', name: 'Activation Emails' },
-    runs: [],
-  },
-  {
-    id: '4',
-    name: 'Premium Feature Announcement',
-    description: 'Announce new premium features',
-    status: 'COMPLETED',
-    scheduleType: 'MANUAL',
-    priority: 60,
-    template: { id: '2', name: 'Weekly Digest', key: 'weekly-digest' },
-    segment: { id: '3', name: 'Premium Subscribers' },
-    senderProfile: { id: '1', fromEmail: 'news@company.com', fromName: 'Company News' },
-    campaignGroup: { id: '3', name: 'Marketing' },
-    runs: [
-      { id: 'r4', status: 'COMPLETED', stats: { total: 12890, sent: 12800, failed: 10, skipped: 80 }, createdAt: '2024-01-10T14:00:00Z' },
-    ],
-  },
-];
+import { api, type Campaign, type CampaignGroup, type Template, type Segment, type SenderProfile } from '@/lib/api';
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, { class: string; label: string }> = {
@@ -144,13 +56,61 @@ function ScheduleBadge({ type, cron }: { type: string; cron?: string | null }) {
 function CreateCampaignModal({
   isOpen,
   onClose,
+  onCreated,
+  templates,
+  segments,
+  senderProfiles,
+  campaignGroups,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  onCreated: () => void;
+  templates: Template[];
+  segments: Segment[];
+  senderProfiles: SenderProfile[];
+  campaignGroups: CampaignGroup[];
 }) {
   const [scheduleType, setScheduleType] = useState<'MANUAL' | 'CRON'>('MANUAL');
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    templateId: '',
+    segmentId: '',
+    senderProfileId: '',
+    campaignGroupId: '',
+    priority: 50,
+    cronExpression: '',
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      await api.campaigns.create({
+        name: formData.name,
+        description: formData.description || undefined,
+        templateId: formData.templateId,
+        segmentId: formData.segmentId,
+        senderProfileId: formData.senderProfileId,
+        campaignGroupId: formData.campaignGroupId || undefined,
+        priority: formData.priority,
+        scheduleType,
+        cronExpression: scheduleType === 'CRON' ? formData.cronExpression : undefined,
+      });
+      onCreated();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create campaign');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -163,13 +123,22 @@ function CreateCampaignModal({
           </button>
         </div>
 
-        <form className="space-y-5">
+        {error && (
+          <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-sm">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="label">Campaign Name</label>
             <input
               type="text"
               className="input"
               placeholder="e.g., Weekly Newsletter"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              required
             />
           </div>
 
@@ -179,24 +148,36 @@ function CreateCampaignModal({
               className="textarea"
               placeholder="Brief description of this campaign"
               rows={2}
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             />
           </div>
 
           <div className="form-grid">
             <div>
               <label className="label">Template</label>
-              <select className="select">
+              <select
+                className="select"
+                value={formData.templateId}
+                onChange={(e) => setFormData({ ...formData, templateId: e.target.value })}
+                required
+              >
                 <option value="">Select a template</option>
-                {mockTemplates.map((t) => (
+                {templates.map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
             </div>
             <div>
               <label className="label">Segment</label>
-              <select className="select">
+              <select
+                className="select"
+                value={formData.segmentId}
+                onChange={(e) => setFormData({ ...formData, segmentId: e.target.value })}
+                required
+              >
                 <option value="">Select a segment</option>
-                {mockSegments.map((s) => (
+                {segments.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
@@ -206,20 +187,29 @@ function CreateCampaignModal({
           <div className="form-grid">
             <div>
               <label className="label">Sender Profile</label>
-              <select className="select">
+              <select
+                className="select"
+                value={formData.senderProfileId}
+                onChange={(e) => setFormData({ ...formData, senderProfileId: e.target.value })}
+                required
+              >
                 <option value="">Select a sender</option>
-                {mockSenderProfiles.map((sp) => (
+                {senderProfiles.map((sp) => (
                   <option key={sp.id} value={sp.id}>
-                    {sp.fromName} ({sp.fromEmail})
+                    {sp.name || sp.fromEmail}
                   </option>
                 ))}
               </select>
             </div>
             <div>
               <label className="label">Campaign Group</label>
-              <select className="select">
+              <select
+                className="select"
+                value={formData.campaignGroupId}
+                onChange={(e) => setFormData({ ...formData, campaignGroupId: e.target.value })}
+              >
                 <option value="">No group (no collision check)</option>
-                {mockCampaignGroups.map((g) => (
+                {campaignGroups.map((g) => (
                   <option key={g.id} value={g.id}>{g.name}</option>
                 ))}
               </select>
@@ -246,9 +236,11 @@ function CreateCampaignModal({
                 placeholder="50"
                 min={1}
                 max={100}
+                value={formData.priority}
+                onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) || 50 })}
               />
               <p className="text-xs text-[var(--text-muted)] mt-1">
-                Higher priority wins in collision detection
+                Lower number = higher priority
               </p>
             </div>
           </div>
@@ -260,6 +252,8 @@ function CreateCampaignModal({
                 type="text"
                 className="input font-mono"
                 placeholder="0 9 * * MON"
+                value={formData.cronExpression}
+                onChange={(e) => setFormData({ ...formData, cronExpression: e.target.value })}
               />
               <p className="text-xs text-[var(--text-muted)] mt-1">
                 e.g., "0 9 * * MON" for every Monday at 9 AM
@@ -271,7 +265,8 @@ function CreateCampaignModal({
             <button type="button" onClick={onClose} className="btn btn-secondary">
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
+            <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+              {isSubmitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : null}
               Create Campaign
             </button>
           </div>
@@ -286,19 +281,57 @@ export default function CampaignsPageClient() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [segments, setSegments] = useState<Segment[]>([]);
+  const [senderProfiles, setSenderProfiles] = useState<SenderProfile[]>([]);
+  const [campaignGroups, setCampaignGroups] = useState<CampaignGroup[]>([]);
+
+  const fetchData = async () => {
+    try {
+      const [campaignsData, templatesData, segmentsData, profilesData, groupsData] = await Promise.all([
+        api.campaigns.list(),
+        api.templates.list(),
+        api.segments.list(),
+        api.senderProfiles.list(),
+        api.campaignGroups.list(),
+      ]);
+
+      setCampaigns(campaignsData);
+      setTemplates(templatesData);
+      setSegments(segmentsData);
+      setSenderProfiles(profilesData);
+      setCampaignGroups(groupsData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 500);
-    return () => clearTimeout(timer);
+    fetchData();
   }, []);
 
-  const filteredCampaigns = mockCampaigns.filter((c) => {
+  const filteredCampaigns = campaigns.filter((c) => {
     const matchesSearch =
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.description?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this campaign?')) return;
+    try {
+      await api.campaigns.delete(id);
+      fetchData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete');
+    }
+  };
 
   if (isLoading) {
     return (
@@ -311,6 +344,23 @@ export default function CampaignsPageClient() {
           {[1, 2, 3].map((i) => (
             <div key={i} className="skeleton" style={{ height: '160px', borderRadius: '16px' }} />
           ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="animate-fade-in">
+        <div className="page-header">
+          <h1 className="page-title">Campaigns</h1>
+        </div>
+        <div className="card">
+          <div className="empty-state">
+            <AlertCircle className="empty-state-icon text-amber-400" />
+            <h3 className="empty-state-title">Unable to load campaigns</h3>
+            <p className="empty-state-description">{error}</p>
+          </div>
         </div>
       </div>
     );
@@ -392,7 +442,7 @@ export default function CampaignsPageClient() {
                       <div className="flex items-center gap-6 text-sm">
                         <div className="flex items-center gap-2 text-[var(--text-muted)]">
                           <Users className="w-4 h-4" />
-                          <span>{campaign.segment?.name}</span>
+                          <span>{campaign.segment?.name || 'No segment'}</span>
                         </div>
                         {campaign.campaignGroup && (
                           <div className="flex items-center gap-2 text-[var(--text-muted)]">
@@ -410,16 +460,6 @@ export default function CampaignsPageClient() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {campaign.status === 'ACTIVE' && (
-                      <button className="btn btn-ghost p-2" title="Pause">
-                        <Pause className="w-4 h-4" />
-                      </button>
-                    )}
-                    {campaign.status === 'PAUSED' && (
-                      <button className="btn btn-ghost p-2" title="Resume">
-                        <Play className="w-4 h-4" />
-                      </button>
-                    )}
                     {campaign.status === 'DRAFT' && (
                       <button className="btn btn-primary text-sm py-1.5 px-3">
                         <Play className="w-4 h-4" />
@@ -430,7 +470,10 @@ export default function CampaignsPageClient() {
                       <button className="btn btn-ghost p-2">
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button className="btn btn-ghost p-2 text-rose-400">
+                      <button
+                        className="btn btn-ghost p-2 text-rose-400"
+                        onClick={() => handleDelete(campaign.id)}
+                      >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -454,11 +497,11 @@ export default function CampaignsPageClient() {
                           </div>
                           <div className="text-xs text-[var(--text-muted)]">Total Sent</div>
                         </div>
-                        {lastRun && (
+                        {lastRun && lastRun.stats && (
                           <>
                             <div className="text-center">
                               <div className="text-lg font-semibold text-emerald-400">
-                                {lastRun.stats ? ((lastRun.stats.sent / lastRun.stats.total) * 100).toFixed(1) : 0}%
+                                {((lastRun.stats.sent / lastRun.stats.total) * 100).toFixed(1)}%
                               </div>
                               <div className="text-xs text-[var(--text-muted)]">Last Success Rate</div>
                             </div>
@@ -506,7 +549,15 @@ export default function CampaignsPageClient() {
         </div>
       )}
 
-      <CreateCampaignModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+      <CreateCampaignModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onCreated={fetchData}
+        templates={templates}
+        segments={segments}
+        senderProfiles={senderProfiles}
+        campaignGroups={campaignGroups}
+      />
     </div>
   );
 }

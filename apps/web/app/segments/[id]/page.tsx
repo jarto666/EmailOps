@@ -11,7 +11,7 @@ export default async function SegmentPage({
 }) {
   const p = await Promise.resolve(params);
   const sp = await Promise.resolve(searchParams);
-  const workspaceId = sp.workspaceId || "default";
+  const workspaceId = sp.workspaceId || "ws_default";
   return <SegmentEditor segmentId={p.id} workspaceId={workspaceId} />;
 }
 

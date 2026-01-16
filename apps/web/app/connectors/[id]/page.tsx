@@ -11,7 +11,7 @@ export default async function ConnectorPage({
 }) {
   const p = await Promise.resolve(params);
   const sp = await Promise.resolve(searchParams);
-  const workspaceId = sp.workspaceId || "default";
+  const workspaceId = sp.workspaceId || "ws_default";
   return <ConnectorEditor connectorId={p.id} workspaceId={workspaceId} />;
 }
 

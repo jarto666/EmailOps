@@ -22,8 +22,8 @@ export class TemplateVersionsService {
     workspaceId: string,
     templateId: string,
     input: {
-      name: string;
       subject: string;
+      preheader?: string;
       mode: AuthoringMode;
       bodyHtml?: string;
       bodyMjml?: string;
@@ -43,11 +43,20 @@ export class TemplateVersionsService {
       throw new BadRequestException("UI_BUILDER versions require builderSchema.");
     }
 
+    // Get next version number
+    const lastVersion = await this.prisma.templateVersion.findFirst({
+      where: { templateId },
+      orderBy: { version: 'desc' },
+      select: { version: true },
+    });
+    const nextVersion = (lastVersion?.version ?? 0) + 1;
+
     return this.prisma.templateVersion.create({
       data: {
         templateId,
-        name: input.name,
+        version: nextVersion,
         subject: input.subject,
+        preheader: input.preheader ?? undefined,
         mode: input.mode,
         bodyHtml: input.bodyHtml ?? undefined,
         bodyMjml: input.bodyMjml ?? undefined,
@@ -77,7 +86,14 @@ export class TemplateVersionsService {
     workspaceId: string,
     templateId: string,
     versionId: string,
-    input: any
+    input: {
+      subject?: string;
+      preheader?: string;
+      mode?: AuthoringMode;
+      bodyHtml?: string;
+      bodyMjml?: string;
+      builderSchema?: Record<string, any>;
+    }
   ) {
     await this.ensureTemplate(workspaceId, templateId);
     const existing = await this.prisma.templateVersion.findFirst({
@@ -89,8 +105,8 @@ export class TemplateVersionsService {
     return this.prisma.templateVersion.update({
       where: { id: versionId },
       data: {
-        name: input.name ?? undefined,
         subject: input.subject ?? undefined,
+        preheader: input.preheader ?? undefined,
         mode: input.mode ?? undefined,
         bodyHtml: input.bodyHtml ?? undefined,
         bodyMjml: input.bodyMjml ?? undefined,

@@ -10,12 +10,12 @@ import {
 import { Type } from 'class-transformer';
 import { ComponentType, ContentType } from '@prisma/client';
 
-class ComponentVariableDto {
+export class ComponentVariableDto {
   @IsString()
-  name: string;
+  name!: string;
 
   @IsString()
-  type: string; // 'string' | 'color' | 'url' | 'image'
+  type!: string; // 'string' | 'color' | 'url' | 'image'
 
   @IsOptional()
   @IsString()
@@ -30,7 +30,7 @@ export class CreateComponentDto {
   @IsString()
   @MinLength(1)
   @MaxLength(50)
-  name: string;
+  name!: string;
 
   @IsOptional()
   @IsString()
@@ -38,7 +38,7 @@ export class CreateComponentDto {
   description?: string;
 
   @IsEnum(ComponentType)
-  type: ComponentType;
+  type!: ComponentType;
 
   @IsOptional()
   @IsEnum(ContentType)
@@ -46,7 +46,7 @@ export class CreateComponentDto {
 
   @IsString()
   @MinLength(1)
-  content: string;
+  content!: string;
 
   @IsOptional()
   @IsArray()

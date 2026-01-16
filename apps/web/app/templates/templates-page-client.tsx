@@ -15,146 +15,267 @@ import {
   Tag,
   Clock,
   CheckCircle2,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
-
-// Mock data
-const mockTemplates = [
-  {
-    id: '1',
-    key: 'welcome-email',
-    name: 'Welcome Email',
-    category: 'TRANSACTIONAL',
-    activeVersion: { id: 'v1', name: 'v1.2', subject: 'Welcome to {{company}}!' },
-    versionsCount: 3,
-    lastUsed: '2024-01-14T10:30:00Z',
-    createdAt: '2024-01-01',
-  },
-  {
-    id: '2',
-    key: 'weekly-digest',
-    name: 'Weekly Digest',
-    category: 'MARKETING',
-    activeVersion: { id: 'v2', name: 'v2.0', subject: 'Your weekly update from {{company}}' },
-    versionsCount: 5,
-    lastUsed: '2024-01-13T08:00:00Z',
-    createdAt: '2023-12-15',
-  },
-  {
-    id: '3',
-    key: 'password-reset',
-    name: 'Password Reset',
-    category: 'TRANSACTIONAL',
-    activeVersion: { id: 'v3', name: 'v1.0', subject: 'Reset your password' },
-    versionsCount: 1,
-    lastUsed: '2024-01-14T15:45:00Z',
-    createdAt: '2024-01-10',
-  },
-  {
-    id: '4',
-    key: 'low-credits-alert',
-    name: 'Low Credits Alert',
-    category: 'BOTH',
-    activeVersion: { id: 'v4', name: 'v1.1', subject: 'Your credits are running low' },
-    versionsCount: 2,
-    lastUsed: '2024-01-12T12:00:00Z',
-    createdAt: '2024-01-05',
-  },
-];
+import { api } from '@/lib/api';
+import type { Template } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 function CategoryBadge({ category }: { category: string }) {
-  const styles = {
-    MARKETING: 'badge-primary',
-    TRANSACTIONAL: 'badge-success',
-    BOTH: 'badge-warning',
+  const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+    MARKETING: 'default',
+    TRANSACTIONAL: 'secondary',
+    BOTH: 'outline',
   };
 
   return (
-    <span className={`badge ${styles[category as keyof typeof styles] || 'badge-default'}`}>
+    <Badge variant={variants[category] || 'outline'}>
       {category}
-    </span>
+    </Badge>
   );
 }
 
 function CreateTemplateModal({
   isOpen,
   onClose,
+  onSuccess,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess: () => void;
 }) {
-  if (!isOpen) return null;
+  const [key, setKey] = useState('');
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState<'MARKETING' | 'TRANSACTIONAL' | 'BOTH'>('MARKETING');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const resetForm = () => {
+    setKey('');
+    setName('');
+    setCategory('MARKETING');
+    setError(null);
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+
+    try {
+      await api.templates.create({ key, name, category });
+      resetForm();
+      onSuccess();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create template');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-2xl w-full max-w-lg p-6 shadow-2xl animate-slide-up">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-semibold text-[var(--text-primary)]">Create Template</h2>
-          <button onClick={onClose} className="btn btn-ghost p-2">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Create Template</DialogTitle>
+        </DialogHeader>
 
-        <form className="space-y-5">
-          <div>
-            <label className="label">Template Key</label>
-            <input
-              type="text"
-              className="input font-mono"
+        {error && (
+          <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <p className="text-sm">{error}</p>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="space-y-2">
+            <Label>Template Key</Label>
+            <Input
+              className="font-mono"
               placeholder="welcome-email"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              required
+              disabled={isSubmitting}
             />
-            <p className="text-xs text-[var(--text-muted)] mt-1">
+            <p className="text-xs text-muted-foreground">
               Unique identifier used in API calls
             </p>
           </div>
 
-          <div>
-            <label className="label">Name</label>
-            <input
-              type="text"
-              className="input"
+          <div className="space-y-2">
+            <Label>Name</Label>
+            <Input
               placeholder="Welcome Email"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              disabled={isSubmitting}
             />
           </div>
 
-          <div>
-            <label className="label">Category</label>
-            <select className="select">
-              <option value="MARKETING">Marketing</option>
-              <option value="TRANSACTIONAL">Transactional</option>
-              <option value="BOTH">Both</option>
-            </select>
-            <p className="text-xs text-[var(--text-muted)] mt-1">
+          <div className="space-y-2">
+            <Label>Category</Label>
+            <Select
+              value={category}
+              onValueChange={(value) => setCategory(value as 'MARKETING' | 'TRANSACTIONAL' | 'BOTH')}
+              disabled={isSubmitting}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="MARKETING">Marketing</SelectItem>
+                <SelectItem value="TRANSACTIONAL">Transactional</SelectItem>
+                <SelectItem value="BOTH">Both</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
               Affects unsubscribe handling and compliance
             </p>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={handleClose} disabled={isSubmitting}>
               Cancel
-            </button>
-            <button type="submit" className="btn btn-primary">
-              Create Template
-            </button>
-          </div>
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create Template'
+              )}
+            </Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteConfirmModal({
+  isOpen,
+  onClose,
+  onConfirm,
+  templateName,
+  isDeleting,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  templateName: string;
+  isDeleting: boolean;
+}) {
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center">
+              <Trash2 className="w-5 h-5 text-destructive" />
+            </div>
+            <DialogTitle>Delete Template</DialogTitle>
+          </div>
+        </DialogHeader>
+
+        <p className="text-muted-foreground">
+          Are you sure you want to delete <span className="font-semibold text-foreground">{templateName}</span>? This action cannot be undone.
+        </p>
+
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose} disabled={isDeleting}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={onConfirm} disabled={isDeleting}>
+            {isDeleting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              'Delete'
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 export default function TemplatesPageClient() {
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; template: Template | null }>({
+    isOpen: false,
+    template: null,
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const fetchTemplates = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await api.templates.list();
+      setTemplates(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load templates');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 500);
-    return () => clearTimeout(timer);
+    fetchTemplates();
   }, []);
 
-  const filteredTemplates = mockTemplates.filter((t) => {
+  const handleDelete = async () => {
+    if (!deleteModal.template) return;
+
+    setIsDeleting(true);
+    try {
+      await api.templates.delete(deleteModal.template.id);
+      setDeleteModal({ isOpen: false, template: null });
+      await fetchTemplates();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete template');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const filteredTemplates = templates.filter((t) => {
     const matchesSearch =
       t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.key.toLowerCase().includes(searchQuery.toLowerCase());
@@ -165,13 +286,13 @@ export default function TemplatesPageClient() {
   if (isLoading) {
     return (
       <div className="animate-fade-in">
-        <div className="page-header">
-          <div className="skeleton" style={{ height: '32px', width: '192px', marginBottom: '8px' }} />
-          <div className="skeleton" style={{ height: '16px', width: '288px' }} />
+        <div className="mb-8">
+          <div className="skeleton h-8 w-48 mb-2" />
+          <div className="skeleton h-4 w-72" />
         </div>
-        <div className="cards-grid-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="skeleton" style={{ height: '192px', borderRadius: '16px' }} />
+            <div key={i} className="skeleton h-48 rounded-lg" />
           ))}
         </div>
       </div>
@@ -181,135 +302,181 @@ export default function TemplatesPageClient() {
   return (
     <div className="animate-slide-up">
       {/* Header */}
-      <div className="flex-between mb-lg">
+      <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="page-title">Templates</h1>
-          <p className="page-description">
+          <h1 className="text-3xl font-bold mb-2">Templates</h1>
+          <p className="text-muted-foreground">
             Manage email templates with version control
           </p>
         </div>
-        <button onClick={() => setIsModalOpen(true)} className="btn btn-primary">
+        <Button onClick={() => setIsModalOpen(true)}>
           <Plus className="w-4 h-4" />
           New Template
-        </button>
+        </Button>
       </div>
 
+      {/* Error Display */}
+      {error && (
+        <div className="flex items-center gap-2 p-4 mb-6 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
+          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <p>{error}</p>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="ml-auto"
+            onClick={() => setError(null)}
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
+      )}
+
       {/* Filters */}
-      <div className="filter-bar">
-        <div className="search-container">
-          <Search className="search-icon" style={{ width: '20px', height: '20px' }} />
-          <input
+      <div className="flex items-center gap-4 mb-6">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground pointer-events-none" />
+          <Input
             type="text"
             placeholder="Search templates..."
-            className="search-input"
+            className="pl-10"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
-        <select
-          className="select"
-          style={{ width: 'auto' }}
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-        >
-          <option value="all">All Categories</option>
-          <option value="MARKETING">Marketing</option>
-          <option value="TRANSACTIONAL">Transactional</option>
-          <option value="BOTH">Both</option>
-        </select>
+        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="All Categories" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            <SelectItem value="MARKETING">Marketing</SelectItem>
+            <SelectItem value="TRANSACTIONAL">Transactional</SelectItem>
+            <SelectItem value="BOTH">Both</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Templates Grid */}
       {filteredTemplates.length > 0 ? (
-        <div className="cards-grid-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {filteredTemplates.map((template) => (
-            <div key={template.id} className="card-glow group">
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center text-blue-400">
-                  <FileText className="w-6 h-6" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <CategoryBadge category={template.category} />
-                  <div className="relative">
-                    <button className="btn btn-ghost p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <MoreVertical className="w-4 h-4" />
-                    </button>
+            <Card key={template.id} className="group hover:border-primary/30 transition-all">
+              <CardContent>
+                <div className="flex items-start justify-between mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center text-blue-400">
+                    <FileText className="w-6 h-6" />
                   </div>
-                </div>
-              </div>
-
-              <Link href={`/templates/${template.id}`} className="block mb-3">
-                <h3 className="text-lg font-semibold text-[var(--text-primary)] hover:text-indigo-400 transition-colors">
-                  {template.name}
-                </h3>
-                <p className="text-sm text-[var(--text-muted)] font-mono mt-1">
-                  {template.key}
-                </p>
-              </Link>
-
-              {template.activeVersion && (
-                <div className="bg-[var(--bg-tertiary)] rounded-lg p-3 mb-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span className="text-sm text-[var(--text-secondary)]">
-                      Active: <span className="text-[var(--text-primary)]">{template.activeVersion.name}</span>
-                    </span>
-                  </div>
-                  <p className="text-sm text-[var(--text-muted)] truncate">
-                    {template.activeVersion.subject}
-                  </p>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between pt-4 border-t border-[var(--border-default)]">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-1.5 text-sm text-[var(--text-muted)]">
-                    <Tag className="w-4 h-4" />
-                    {template.versionsCount} versions
-                  </div>
-                  {template.lastUsed && (
-                    <div className="flex items-center gap-1.5 text-sm text-[var(--text-muted)]">
-                      <Clock className="w-4 h-4" />
-                      {new Date(template.lastUsed).toLocaleDateString()}
+                  <div className="flex items-center gap-2">
+                    <CategoryBadge category={template.category} />
+                    <div className="relative">
+                      <Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
                     </div>
-                  )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button className="btn btn-ghost p-2">
-                    <Eye className="w-4 h-4" />
-                  </button>
-                  <button className="btn btn-ghost p-2">
-                    <Copy className="w-4 h-4" />
-                  </button>
-                  <button className="btn btn-ghost p-2">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
+
+                <Link href={`/templates/${template.id}`} className="block mb-3">
+                  <h3 className="text-lg font-semibold hover:text-primary transition-colors">
+                    {template.name}
+                  </h3>
+                  <p className="text-sm text-muted-foreground font-mono mt-1">
+                    {template.key}
+                  </p>
+                </Link>
+
+                {template.versions && template.versions.length > 0 && (
+                  <div className="bg-secondary rounded-lg p-3 mb-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span className="text-sm text-muted-foreground">
+                        Active: <span className="text-foreground">v{template.versions[0].version}</span>
+                      </span>
+                    </div>
+                    {template.versions[0].subject && (
+                      <p className="text-sm text-muted-foreground truncate">
+                        {template.versions[0].subject}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-4 border-t border-border">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                      <Tag className="w-4 h-4" />
+                      {template._count?.versions ?? template.versions?.length ?? 0} versions
+                    </div>
+                    {template.updatedAt && (
+                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <Clock className="w-4 h-4" />
+                        {new Date(template.updatedAt).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button variant="ghost" size="icon" asChild>
+                      <Link href={`/templates/${template.id}`}>
+                        <Eye className="w-4 h-4" />
+                      </Link>
+                    </Button>
+                    <Button variant="ghost" size="icon">
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" asChild>
+                      <Link href={`/templates/${template.id}`}>
+                        <Edit2 className="w-4 h-4" />
+                      </Link>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive hover:bg-destructive/10"
+                      onClick={() => setDeleteModal({ isOpen: true, template })}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
       ) : (
-        <div className="card">
-          <div className="empty-state">
-            <FileText className="empty-state-icon" />
-            <h3 className="empty-state-title">No templates found</h3>
-            <p className="empty-state-description">
-              {searchQuery || categoryFilter !== 'all'
-                ? 'No templates match your filters'
-                : 'Create your first email template to get started'}
-            </p>
-            {!searchQuery && categoryFilter === 'all' && (
-              <button onClick={() => setIsModalOpen(true)} className="btn btn-primary">
-                <Plus className="w-4 h-4" />
-                Create Template
-              </button>
-            )}
-          </div>
-        </div>
+        <Card>
+          <CardContent className="py-16">
+            <div className="flex flex-col items-center justify-center text-center">
+              <FileText className="w-16 h-16 text-muted-foreground mb-4 opacity-50" />
+              <h3 className="text-lg font-semibold mb-2">No templates found</h3>
+              <p className="text-muted-foreground max-w-xs mb-4">
+                {searchQuery || categoryFilter !== 'all'
+                  ? 'No templates match your filters'
+                  : 'Create your first email template to get started'}
+              </p>
+              {!searchQuery && categoryFilter === 'all' && (
+                <Button onClick={() => setIsModalOpen(true)}>
+                  <Plus className="w-4 h-4" />
+                  Create Template
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
-      <CreateTemplateModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+      <CreateTemplateModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSuccess={fetchTemplates}
+      />
+
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, template: null })}
+        onConfirm={handleDelete}
+        templateName={deleteModal.template?.name || ''}
+        isDeleting={isDeleting}
+      />
     </div>
   );
 }

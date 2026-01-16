@@ -9,7 +9,7 @@ export default async function DataConnectorPage({
 }) {
   const p = await Promise.resolve(params);
   const sp = await Promise.resolve(searchParams);
-  const workspaceId = sp.workspaceId || "default";
+  const workspaceId = sp.workspaceId || "ws_default";
   return <DataConnectorEditor dataConnectorId={p.id} workspaceId={workspaceId} />;
 }
 

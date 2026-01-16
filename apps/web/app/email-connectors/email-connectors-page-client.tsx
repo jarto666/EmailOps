@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Mail,
@@ -14,46 +14,10 @@ import {
   AlertCircle,
   RefreshCw,
   Plug,
-  Send,
   Shield,
 } from 'lucide-react';
-
-// Mock data
-const mockConnectors = [
-  {
-    id: '1',
-    name: 'AWS SES Production',
-    type: 'SES',
-    status: 'connected',
-    region: 'us-east-1',
-    lastChecked: '2024-01-14T10:30:00Z',
-    profilesCount: 3,
-    totalSent: 125430,
-    createdAt: '2024-01-01',
-  },
-  {
-    id: '2',
-    name: 'Resend Transactional',
-    type: 'RESEND',
-    status: 'connected',
-    lastChecked: '2024-01-14T10:25:00Z',
-    profilesCount: 2,
-    totalSent: 45230,
-    createdAt: '2024-01-05',
-  },
-  {
-    id: '3',
-    name: 'SMTP Backup',
-    type: 'SMTP',
-    status: 'error',
-    host: 'smtp.example.com',
-    lastChecked: '2024-01-14T09:00:00Z',
-    profilesCount: 0,
-    totalSent: 0,
-    error: 'Authentication failed',
-    createdAt: '2024-01-10',
-  },
-];
+import { api } from '@/lib/api';
+import type { EmailConnector } from '@/lib/api';
 
 function ConnectorTypeBadge({ type }: { type: string }) {
   const styles = {
@@ -84,67 +48,160 @@ function StatusIndicator({ status, error }: { status: string; error?: string }) 
   );
 }
 
-const sesConfig = {
-  region: 'us-east-1',
-  accessKeyId: 'AKIA...',
-  secretAccessKey: '...',
+type SESConfig = {
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
 };
 
-const resendConfig = {
-  apiKey: 're_...',
+type ResendConfig = {
+  apiKey: string;
 };
 
-const smtpConfig = {
-  host: 'smtp.example.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: 'user@example.com',
-    pass: '...',
-  },
+type SMTPConfig = {
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string;
+  password: string;
 };
 
 function CreateConnectorModal({
   isOpen,
   onClose,
+  onSuccess,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess: () => void;
 }) {
+  const [name, setName] = useState('');
   const [type, setType] = useState<'SES' | 'RESEND' | 'SMTP'>('SES');
-  const [config, setConfig] = useState(JSON.stringify(sesConfig, null, 2));
+
+  // SES config
+  const [sesConfig, setSesConfig] = useState<SESConfig>({
+    region: 'us-east-1',
+    accessKeyId: '',
+    secretAccessKey: '',
+  });
+
+  // Resend config
+  const [resendConfig, setResendConfig] = useState<ResendConfig>({
+    apiKey: '',
+  });
+
+  // SMTP config
+  const [smtpConfig, setSmtpConfig] = useState<SMTPConfig>({
+    host: '',
+    port: 587,
+    secure: false,
+    username: '',
+    password: '',
+  });
+
   const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleTypeChange = (newType: 'SES' | 'RESEND' | 'SMTP') => {
     setType(newType);
-    const configs = { SES: sesConfig, RESEND: resendConfig, SMTP: smtpConfig };
-    setConfig(JSON.stringify(configs[newType], null, 2));
     setTestResult(null);
+    setError(null);
   };
 
-  const handleTest = () => {
+  const getConfig = () => {
+    if (type === 'SES') {
+      return sesConfig;
+    } else if (type === 'RESEND') {
+      return resendConfig;
+    } else {
+      return {
+        host: smtpConfig.host,
+        port: smtpConfig.port,
+        secure: smtpConfig.secure,
+        auth: {
+          user: smtpConfig.username,
+          pass: smtpConfig.password,
+        },
+      };
+    }
+  };
+
+  const handleTest = async () => {
     setTesting(true);
-    setTimeout(() => {
+    setTestResult(null);
+    setError(null);
+
+    try {
+      // Validate required fields based on type
+      if (type === 'SES' && (!sesConfig.accessKeyId || !sesConfig.secretAccessKey)) {
+        throw new Error('Access Key ID and Secret Access Key are required');
+      }
+      if (type === 'RESEND' && !resendConfig.apiKey) {
+        throw new Error('API Key is required');
+      }
+      if (type === 'SMTP' && (!smtpConfig.host || !smtpConfig.username || !smtpConfig.password)) {
+        throw new Error('Host, username, and password are required');
+      }
       setTestResult({ success: true });
+    } catch (err) {
+      setTestResult({ success: false, error: err instanceof Error ? err.message : 'Validation failed' });
+    } finally {
       setTesting(false);
-    }, 1500);
+    }
+  };
+
+  const resetForm = () => {
+    setName('');
+    setType('SES');
+    setSesConfig({ region: 'us-east-1', accessKeyId: '', secretAccessKey: '' });
+    setResendConfig({ apiKey: '' });
+    setSmtpConfig({ host: '', port: 587, secure: false, username: '', password: '' });
+    setTestResult(null);
+    setError(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      await api.emailConnectors.create({
+        name,
+        type,
+        config: getConfig(),
+      });
+      onSuccess();
+      resetForm();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create connector');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
   };
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleClose} />
       <div className="relative bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-2xl w-full max-w-2xl p-6 shadow-2xl animate-slide-up max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-semibold text-[var(--text-primary)]">Add Email Provider</h2>
-          <button onClick={onClose} className="btn btn-ghost p-2">
+          <button onClick={handleClose} className="btn btn-ghost p-2">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form className="space-y-5">
+        <form className="space-y-5" onSubmit={handleSubmit}>
           <div className="form-grid">
             <div>
               <label className="label">Name</label>
@@ -152,6 +209,9 @@ function CreateConnectorModal({
                 type="text"
                 className="input"
                 placeholder="e.g., AWS SES Production"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
               />
             </div>
             <div>
@@ -168,32 +228,153 @@ function CreateConnectorModal({
             </div>
           </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="label mb-0">Configuration (JSON)</label>
-              <button
-                type="button"
-                onClick={handleTest}
-                disabled={testing}
-                className="btn btn-ghost text-sm py-1.5"
-              >
-                {testing ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Plug className="w-4 h-4" />
-                )}
-                Test Connection
-              </button>
+          {/* SES Configuration */}
+          {type === 'SES' && (
+            <div className="space-y-4">
+              <div>
+                <label className="label">AWS Region</label>
+                <select
+                  className="select"
+                  value={sesConfig.region}
+                  onChange={(e) => setSesConfig((c) => ({ ...c, region: e.target.value }))}
+                >
+                  <option value="us-east-1">US East (N. Virginia)</option>
+                  <option value="us-east-2">US East (Ohio)</option>
+                  <option value="us-west-1">US West (N. California)</option>
+                  <option value="us-west-2">US West (Oregon)</option>
+                  <option value="eu-west-1">EU (Ireland)</option>
+                  <option value="eu-west-2">EU (London)</option>
+                  <option value="eu-central-1">EU (Frankfurt)</option>
+                  <option value="ap-south-1">Asia Pacific (Mumbai)</option>
+                  <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
+                  <option value="ap-southeast-2">Asia Pacific (Sydney)</option>
+                  <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Access Key ID</label>
+                <input
+                  type="text"
+                  className="input font-mono"
+                  placeholder="AKIAIOSFODNN7EXAMPLE"
+                  value={sesConfig.accessKeyId}
+                  onChange={(e) => setSesConfig((c) => ({ ...c, accessKeyId: e.target.value }))}
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Secret Access Key</label>
+                <input
+                  type="password"
+                  className="input font-mono"
+                  placeholder="••••••••••••••••••••"
+                  value={sesConfig.secretAccessKey}
+                  onChange={(e) => setSesConfig((c) => ({ ...c, secretAccessKey: e.target.value }))}
+                  required
+                />
+              </div>
             </div>
-            <textarea
-              className="textarea font-mono text-sm h-48"
-              value={config}
-              onChange={(e) => setConfig(e.target.value)}
-              spellCheck={false}
-            />
-            <p className="text-xs text-[var(--text-muted)] mt-2">
-              Credentials are encrypted at rest and never exposed via API
-            </p>
+          )}
+
+          {/* Resend Configuration */}
+          {type === 'RESEND' && (
+            <div>
+              <label className="label">API Key</label>
+              <input
+                type="password"
+                className="input font-mono"
+                placeholder="re_••••••••••••••••••••"
+                value={resendConfig.apiKey}
+                onChange={(e) => setResendConfig({ apiKey: e.target.value })}
+                required
+              />
+              <p className="text-xs text-[var(--text-muted)] mt-2">
+                Get your API key from the Resend dashboard
+              </p>
+            </div>
+          )}
+
+          {/* SMTP Configuration */}
+          {type === 'SMTP' && (
+            <div className="space-y-4">
+              <div className="form-grid">
+                <div>
+                  <label className="label">Host</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="smtp.example.com"
+                    value={smtpConfig.host}
+                    onChange={(e) => setSmtpConfig((c) => ({ ...c, host: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">Port</label>
+                  <input
+                    type="number"
+                    className="input"
+                    placeholder="587"
+                    value={smtpConfig.port}
+                    onChange={(e) => setSmtpConfig((c) => ({ ...c, port: parseInt(e.target.value) || 587 }))}
+                    required
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={smtpConfig.secure}
+                    onChange={(e) => setSmtpConfig((c) => ({ ...c, secure: e.target.checked }))}
+                    className="w-4 h-4 rounded border-[var(--border-default)] bg-[var(--bg-tertiary)]"
+                  />
+                  <span className="text-sm text-[var(--text-secondary)]">Use TLS/SSL (port 465)</span>
+                </label>
+              </div>
+              <div>
+                <label className="label">Username</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="user@example.com"
+                  value={smtpConfig.username}
+                  onChange={(e) => setSmtpConfig((c) => ({ ...c, username: e.target.value }))}
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Password</label>
+                <input
+                  type="password"
+                  className="input"
+                  placeholder="••••••••••••"
+                  value={smtpConfig.password}
+                  onChange={(e) => setSmtpConfig((c) => ({ ...c, password: e.target.value }))}
+                  required
+                />
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-[var(--text-muted)]">
+            Credentials are encrypted at rest and never exposed via API
+          </p>
+
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              onClick={handleTest}
+              disabled={testing}
+              className="btn btn-ghost text-sm"
+            >
+              {testing ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Plug className="w-4 h-4" />
+              )}
+              Test Connection
+            </button>
           </div>
 
           {testResult && (
@@ -205,7 +386,7 @@ function CreateConnectorModal({
               {testResult.success ? (
                 <>
                   <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  <span className="text-emerald-400 font-medium">Connection successful</span>
+                  <span className="text-emerald-400 font-medium">Configuration valid</span>
                 </>
               ) : (
                 <>
@@ -216,12 +397,26 @@ function CreateConnectorModal({
             </div>
           )}
 
+          {error && (
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-rose-500/10 border border-rose-500/20">
+              <AlertCircle className="w-5 h-5 text-rose-400" />
+              <span className="text-rose-400">{error}</span>
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-4">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
+            <button type="button" onClick={handleClose} className="btn btn-secondary">
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Add Provider
+            <button type="submit" className="btn btn-primary" disabled={submitting}>
+              {submitting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                'Add Provider'
+              )}
             </button>
           </div>
         </form>
@@ -233,16 +428,71 @@ function CreateConnectorModal({
 export default function EmailConnectorsPageClient() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [connectors, setConnectors] = useState<EmailConnector[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 500);
-    return () => clearTimeout(timer);
+  const fetchConnectors = useCallback(async () => {
+    try {
+      setError(null);
+      const data = await api.emailConnectors.list();
+      setConnectors(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch connectors');
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const filteredConnectors = mockConnectors.filter(
+  useEffect(() => {
+    fetchConnectors();
+  }, [fetchConnectors]);
+
+  const handleTestConnection = async (id: string) => {
+    setTestingId(id);
+    try {
+      await api.emailConnectors.test(id);
+      // Refresh to get updated status
+      await fetchConnectors();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Connection test failed');
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this connector?')) {
+      return;
+    }
+
+    setDeletingId(id);
+    try {
+      await api.emailConnectors.delete(id);
+      setConnectors((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete connector');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const filteredConnectors = connectors.filter(
     (c) => c.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Helper to extract display info from connector config
+  const getConnectorDetails = (connector: EmailConnector) => {
+    const config = connector.config as Record<string, unknown>;
+    return {
+      region: config?.region as string | undefined,
+      host: config?.host as string | undefined,
+      status: 'connected', // Default status - could be enhanced with actual status tracking
+      profilesCount: connector._count?.senderProfiles ?? 0,
+    };
+  };
 
   if (isLoading) {
     return (
@@ -275,6 +525,20 @@ export default function EmailConnectorsPageClient() {
           Add Provider
         </button>
       </div>
+
+      {/* Error Alert */}
+      {error && (
+        <div className="flex items-center gap-3 p-4 mb-6 rounded-lg bg-rose-500/10 border border-rose-500/20">
+          <AlertCircle className="w-5 h-5 text-rose-400 flex-shrink-0" />
+          <span className="text-rose-400">{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="ml-auto btn btn-ghost p-1"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Info Card */}
       <div className="card-glow mb-8">
@@ -309,69 +573,83 @@ export default function EmailConnectorsPageClient() {
       {/* Connectors Grid */}
       {filteredConnectors.length > 0 ? (
         <div className="cards-grid">
-          {filteredConnectors.map((connector) => (
-            <div key={connector.id} className="card-glow group">
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center text-amber-400">
-                  <Mail className="w-6 h-6" />
-                </div>
-                <div className="relative">
-                  <button className="btn btn-ghost p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+          {filteredConnectors.map((connector) => {
+            const details = getConnectorDetails(connector);
+            const isDeleting = deletingId === connector.id;
+            const isTesting = testingId === connector.id;
 
-              <Link href={`/email-connectors/${connector.id}`} className="block mb-3">
-                <h3 className="text-lg font-semibold text-[var(--text-primary)] hover:text-indigo-400 transition-colors">
-                  {connector.name}
-                </h3>
-                {connector.region && (
-                  <p className="text-sm text-[var(--text-muted)] mt-0.5">
-                    Region: {connector.region}
-                  </p>
-                )}
-                {connector.host && (
-                  <p className="text-sm text-[var(--text-muted)] mt-0.5">
-                    Host: {connector.host}
-                  </p>
-                )}
-              </Link>
-
-              <div className="flex items-center gap-3 mb-4">
-                <ConnectorTypeBadge type={connector.type} />
-                <StatusIndicator status={connector.status} error={connector.error} />
-              </div>
-
-              <div className="flex items-center justify-between pt-4 border-t border-[var(--border-default)]">
-                <div className="flex items-center gap-4">
-                  <div className="text-center">
-                    <div className="text-lg font-semibold text-[var(--text-primary)]">
-                      {connector.profilesCount}
-                    </div>
-                    <div className="text-xs text-[var(--text-muted)]">Profiles</div>
+            return (
+              <div key={connector.id} className="card-glow group">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center text-amber-400">
+                    <Mail className="w-6 h-6" />
                   </div>
-                  <div className="text-center">
-                    <div className="text-lg font-semibold text-[var(--text-primary)]">
-                      {(connector.totalSent / 1000).toFixed(1)}K
-                    </div>
-                    <div className="text-xs text-[var(--text-muted)]">Sent</div>
+                  <div className="relative">
+                    <button className="btn btn-ghost p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button className="btn btn-ghost p-2">
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
-                  <button className="btn btn-ghost p-2">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button className="btn btn-ghost p-2 text-rose-400">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+
+                <Link href={`/email-connectors/${connector.id}`} className="block mb-3">
+                  <h3 className="text-lg font-semibold text-[var(--text-primary)] hover:text-indigo-400 transition-colors">
+                    {connector.name}
+                  </h3>
+                  {details.region && (
+                    <p className="text-sm text-[var(--text-muted)] mt-0.5">
+                      Region: {details.region}
+                    </p>
+                  )}
+                  {details.host && (
+                    <p className="text-sm text-[var(--text-muted)] mt-0.5">
+                      Host: {details.host}
+                    </p>
+                  )}
+                </Link>
+
+                <div className="flex items-center gap-3 mb-4">
+                  <ConnectorTypeBadge type={connector.type} />
+                  <StatusIndicator status={details.status} />
+                </div>
+
+                <div className="flex items-center justify-between pt-4 border-t border-[var(--border-default)]">
+                  <div className="flex items-center gap-4">
+                    <div className="text-center">
+                      <div className="text-lg font-semibold text-[var(--text-primary)]">
+                        {details.profilesCount}
+                      </div>
+                      <div className="text-xs text-[var(--text-muted)]">Profiles</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      className="btn btn-ghost p-2"
+                      onClick={() => handleTestConnection(connector.id)}
+                      disabled={isTesting}
+                      title="Test connection"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isTesting ? 'animate-spin' : ''}`} />
+                    </button>
+                    <Link href={`/email-connectors/${connector.id}/edit`} className="btn btn-ghost p-2">
+                      <Edit2 className="w-4 h-4" />
+                    </Link>
+                    <button
+                      className="btn btn-ghost p-2 text-rose-400"
+                      onClick={() => handleDelete(connector.id)}
+                      disabled={isDeleting}
+                      title="Delete connector"
+                    >
+                      {isDeleting ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="card">
@@ -393,7 +671,11 @@ export default function EmailConnectorsPageClient() {
         </div>
       )}
 
-      <CreateConnectorModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+      <CreateConnectorModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSuccess={fetchConnectors}
+      />
     </div>
   );
 }

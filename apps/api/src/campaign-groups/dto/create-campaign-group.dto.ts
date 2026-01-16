@@ -5,7 +5,7 @@ export class CreateCampaignGroupDto {
   @IsString()
   @MinLength(1)
   @MaxLength(100)
-  name: string;
+  name!: string;
 
   @IsOptional()
   @IsString()

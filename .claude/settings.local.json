@@ -4,7 +4,8 @@
       "Bash(xargs:*)",
       "Bash(git -C /Users/ellion/Projects/Private/email-ops log --oneline -20)",
       "Bash(find:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(pnpm test:*)"
     ]
   }
 }

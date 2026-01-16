@@ -7,7 +7,7 @@ export default async function ConnectorsPage({
   searchParams: Promise<{ workspaceId?: string }> | { workspaceId?: string };
 }) {
   const sp = await Promise.resolve(searchParams);
-  const workspaceId = sp.workspaceId || "default";
+  const workspaceId = sp.workspaceId || "ws_default";
   return <ConnectorsPageClient workspaceId={workspaceId} />;
 }
 

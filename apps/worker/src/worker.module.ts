@@ -5,8 +5,6 @@ import { SegmentProcessor } from "./processors/segment.processor";
 import { SendProcessor } from "./processors/send.processor";
 import { EventsProcessor } from "./processors/events.processor";
 import { SingleSendProcessor } from "./processors/single-send.processor";
-import { JourneyEnrollmentProcessor } from "./processors/journey-enrollment.processor";
-import { JourneyStepProcessor } from "./processors/journey-step.processor";
 import { PrismaModule } from "./prisma/prisma.module";
 import { join } from "path";
 
@@ -27,7 +25,6 @@ import { join } from "path";
       { name: "singleSend" },
       { name: "segment" },
       { name: "send" },
-      { name: "journey" },
       { name: "events" }
     ),
   ],
@@ -35,8 +32,6 @@ import { join } from "path";
     SingleSendProcessor,
     SegmentProcessor,
     SendProcessor,
-    JourneyEnrollmentProcessor,
-    JourneyStepProcessor,
     EventsProcessor,
   ],
 })

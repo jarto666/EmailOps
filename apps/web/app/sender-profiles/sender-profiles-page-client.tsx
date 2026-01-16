@@ -14,59 +14,77 @@ import {
   AtSign,
   MessageSquare,
   Send,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
-
-// Mock data
-const mockConnectors = [
-  { id: '1', name: 'AWS SES Production', type: 'SES' },
-  { id: '2', name: 'Resend Transactional', type: 'RESEND' },
-];
-
-const mockProfiles = [
-  {
-    id: '1',
-    fromEmail: 'news@company.com',
-    fromName: 'Company News',
-    replyTo: 'support@company.com',
-    connectorId: '1',
-    connector: { name: 'AWS SES Production', type: 'SES' },
-    totalSent: 89450,
-    campaignsCount: 12,
-    createdAt: '2024-01-01',
-  },
-  {
-    id: '2',
-    fromEmail: 'noreply@company.com',
-    fromName: 'Company',
-    replyTo: null,
-    connectorId: '1',
-    connector: { name: 'AWS SES Production', type: 'SES' },
-    totalSent: 34230,
-    campaignsCount: 5,
-    createdAt: '2024-01-05',
-  },
-  {
-    id: '3',
-    fromEmail: 'alerts@company.com',
-    fromName: 'Company Alerts',
-    replyTo: 'support@company.com',
-    connectorId: '2',
-    connector: { name: 'Resend Transactional', type: 'RESEND' },
-    totalSent: 12890,
-    campaignsCount: 3,
-    createdAt: '2024-01-10',
-  },
-];
+import { api } from '@/lib/api';
+import type { SenderProfile, EmailConnector } from '@/lib/api';
 
 function CreateProfileModal({
   isOpen,
   onClose,
   connectors,
+  onSubmit,
+  isSubmitting,
 }: {
   isOpen: boolean;
   onClose: () => void;
-  connectors: typeof mockConnectors;
+  connectors: EmailConnector[];
+  onSubmit: (data: {
+    fromEmail: string;
+    fromName: string;
+    replyTo?: string;
+    emailProviderConnectorId: string;
+  }) => Promise<void>;
+  isSubmitting: boolean;
 }) {
+  const [formData, setFormData] = useState({
+    fromEmail: '',
+    fromName: '',
+    replyTo: '',
+    emailProviderConnectorId: '',
+  });
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen && connectors.length > 0 && !formData.emailProviderConnectorId) {
+      setFormData((prev) => ({ ...prev, emailProviderConnectorId: connectors[0].id }));
+    }
+  }, [isOpen, connectors, formData.emailProviderConnectorId]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setFormData({
+        fromEmail: '',
+        fromName: '',
+        replyTo: '',
+        emailProviderConnectorId: connectors[0]?.id || '',
+      });
+      setError(null);
+    }
+  }, [isOpen, connectors]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!formData.fromEmail || !formData.fromName || !formData.emailProviderConnectorId) {
+      setError('Please fill in all required fields');
+      return;
+    }
+
+    try {
+      await onSubmit({
+        fromEmail: formData.fromEmail,
+        fromName: formData.fromName,
+        replyTo: formData.replyTo || undefined,
+        emailProviderConnectorId: formData.emailProviderConnectorId,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create profile');
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -75,15 +93,29 @@ function CreateProfileModal({
       <div className="relative bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-2xl w-full max-w-lg p-6 shadow-2xl animate-slide-up">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-semibold text-[var(--text-primary)]">Create Sender Profile</h2>
-          <button onClick={onClose} className="btn btn-ghost p-2">
+          <button onClick={onClose} className="btn btn-ghost p-2" disabled={isSubmitting}>
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form className="space-y-5">
+        {error && (
+          <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center gap-2 text-rose-400">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span className="text-sm">{error}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="label">Email Provider</label>
-            <select className="select">
+            <select
+              className="select"
+              value={formData.emailProviderConnectorId}
+              onChange={(e) =>
+                setFormData((prev) => ({ ...prev, emailProviderConnectorId: e.target.value }))
+              }
+              disabled={isSubmitting}
+            >
               {connectors.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name} ({c.type})
@@ -98,8 +130,12 @@ function CreateProfileModal({
               <AtSign className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-muted)]" />
               <input
                 type="email"
-                className="input pl-10"
+                className="input input-with-icon"
                 placeholder="news@yourdomain.com"
+                value={formData.fromEmail}
+                onChange={(e) => setFormData((prev) => ({ ...prev, fromEmail: e.target.value }))}
+                disabled={isSubmitting}
+                required
               />
             </div>
             <p className="text-xs text-[var(--text-muted)] mt-1">
@@ -113,6 +149,10 @@ function CreateProfileModal({
               type="text"
               className="input"
               placeholder="Your Company"
+              value={formData.fromName}
+              onChange={(e) => setFormData((prev) => ({ ...prev, fromName: e.target.value }))}
+              disabled={isSubmitting}
+              required
             />
           </div>
 
@@ -122,18 +162,33 @@ function CreateProfileModal({
               <MessageSquare className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-muted)]" />
               <input
                 type="email"
-                className="input pl-10"
+                className="input input-with-icon"
                 placeholder="support@yourdomain.com"
+                value={formData.replyTo}
+                onChange={(e) => setFormData((prev) => ({ ...prev, replyTo: e.target.value }))}
+                disabled={isSubmitting}
               />
             </div>
           </div>
 
           <div className="flex justify-end gap-3 pt-4">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn btn-secondary"
+              disabled={isSubmitting}
+            >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Create Profile
+            <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create Profile'
+              )}
             </button>
           </div>
         </form>
@@ -146,13 +201,65 @@ export default function SenderProfilesPageClient() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [profiles, setProfiles] = useState<SenderProfile[]>([]);
+  const [emailConnectors, setEmailConnectors] = useState<EmailConnector[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const fetchData = async () => {
+    try {
+      setError(null);
+      const [profilesData, connectorsData] = await Promise.all([
+        api.senderProfiles.list(),
+        api.emailConnectors.list(),
+      ]);
+      setProfiles(profilesData);
+      setEmailConnectors(connectorsData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 500);
-    return () => clearTimeout(timer);
+    fetchData();
   }, []);
 
-  const filteredProfiles = mockProfiles.filter(
+  const handleCreateProfile = async (data: {
+    fromEmail: string;
+    fromName: string;
+    replyTo?: string;
+    emailProviderConnectorId: string;
+  }) => {
+    setIsSubmitting(true);
+    try {
+      const newProfile = await api.senderProfiles.create(data);
+      setProfiles((prev) => [...prev, newProfile]);
+      setIsModalOpen(false);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteProfile = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this sender profile?')) {
+      return;
+    }
+
+    setDeletingId(id);
+    try {
+      await api.senderProfiles.delete(id);
+      setProfiles((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete profile');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const filteredProfiles = profiles.filter(
     (p) =>
       p.fromEmail.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.fromName?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -189,6 +296,20 @@ export default function SenderProfilesPageClient() {
           New Profile
         </button>
       </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center gap-3 text-rose-400">
+          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <span>{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="ml-auto btn btn-ghost p-1"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Info Card */}
       <div className="card-glow mb-8">
@@ -255,7 +376,7 @@ export default function SenderProfilesPageClient() {
               <div className="flex items-center gap-2 mb-4">
                 <span className="badge badge-default">
                   <Mail className="w-3 h-3 mr-1" />
-                  {profile.connector?.name}
+                  {profile.emailProviderConnector?.name || 'No connector'}
                 </span>
               </div>
 
@@ -263,23 +384,25 @@ export default function SenderProfilesPageClient() {
                 <div className="flex items-center gap-4">
                   <div className="text-center">
                     <div className="text-lg font-semibold text-[var(--text-primary)]">
-                      {profile.campaignsCount}
+                      {profile._count?.singleSends ?? 0}
                     </div>
                     <div className="text-xs text-[var(--text-muted)]">Campaigns</div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-lg font-semibold text-[var(--text-primary)]">
-                      {(profile.totalSent / 1000).toFixed(1)}K
-                    </div>
-                    <div className="text-xs text-[var(--text-muted)]">Sent</div>
-                  </div>
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button className="btn btn-ghost p-2">
+                  <Link href={`/sender-profiles/${profile.id}/edit`} className="btn btn-ghost p-2">
                     <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button className="btn btn-ghost p-2 text-rose-400">
-                    <Trash2 className="w-4 h-4" />
+                  </Link>
+                  <button
+                    className="btn btn-ghost p-2 text-rose-400"
+                    onClick={() => handleDeleteProfile(profile.id)}
+                    disabled={deletingId === profile.id}
+                  >
+                    {deletingId === profile.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
                   </button>
                 </div>
               </div>
@@ -309,7 +432,9 @@ export default function SenderProfilesPageClient() {
       <CreateProfileModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        connectors={mockConnectors}
+        connectors={emailConnectors}
+        onSubmit={handleCreateProfile}
+        isSubmitting={isSubmitting}
       />
     </div>
   );

@@ -10,10 +10,6 @@ import {
 export class CreateTemplateVersionDto {
   @IsString()
   @IsNotEmpty()
-  name!: string; // e.g. "v1"
-
-  @IsString()
-  @IsNotEmpty()
   subject!: string;
 
   @IsEnum(AuthoringMode)
@@ -36,10 +32,6 @@ export class CreateTemplateVersionDto {
 }
 
 export class UpdateTemplateVersionDto {
-  @IsString()
-  @IsOptional()
-  name?: string;
-
   @IsString()
   @IsOptional()
   subject?: string;
