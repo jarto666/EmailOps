@@ -1,0 +1,117 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "install",
+      "type": "shell",
+      "command": "make install",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "dev",
+      "type": "shell",
+      "command": "make dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": ".*"
+        }
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "make build",
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "make test",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "test:unit",
+      "type": "shell",
+      "command": "make test-unit",
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "test:integration",
+      "type": "shell",
+      "command": "make test-integration",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "db:generate",
+      "type": "shell",
+      "command": "make db-generate",
+      "problemMatcher": []
+    },
+    {
+      "label": "db:push",
+      "type": "shell",
+      "command": "make db-push",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker:up",
+      "type": "shell",
+      "command": "make up",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker:down",
+      "type": "shell",
+      "command": "make down",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker:logs",
+      "type": "shell",
+      "command": "make logs",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "lint",
+      "type": "shell",
+      "command": "make lint",
+      "problemMatcher": []
+    },
+    {
+      "label": "format",
+      "type": "shell",
+      "command": "make format",
+      "problemMatcher": []
+    },
+    {
+      "label": "clean",
+      "type": "shell",
+      "command": "make clean",
+      "problemMatcher": []
+    }
+  ]
+}

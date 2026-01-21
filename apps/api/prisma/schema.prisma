@@ -1,0 +1,511 @@
+// =============================================================================
+// EmailOps Database Schema
+// =============================================================================
+// Single-tenant deployment (one workspace per installation)
+// See: ARCHITECTURE.md for design decisions
+// =============================================================================
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// =============================================================================
+// CORE ENTITIES
+// =============================================================================
+
+// Single workspace per deployment (single-tenant design)
+// Kept for future flexibility but not exposed in UI
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Connectors
+  dataConnectors          DataConnector[]
+  emailProviderConnectors EmailProviderConnector[]
+  senderProfiles          SenderProfile[]
+
+  // Content
+  templates      Template[]
+  segments       Segment[]
+  components     Component[]
+
+  // Campaigns
+  campaignGroups CampaignGroup[]
+  singleSends    SingleSend[]
+  sendLogs       SendLog[]
+
+  // Delivery
+  suppressions   Suppression[]
+  preferences    Preference[]
+
+  // Future: Journey automation (deprioritized)
+  // journeys     Journey[]
+  // subjects     Subject[]
+  // events       Event[]
+}
+
+// =============================================================================
+// CAMPAIGN GROUPS & COLLISION ENGINE
+// =============================================================================
+
+enum CollisionPolicy {
+  HIGHEST_PRIORITY_WINS  // Only send highest priority campaign per user per window
+  FIRST_QUEUED_WINS      // First campaign to queue the user wins
+  SEND_ALL               // No collision handling (opt-out)
+}
+
+// Groups related campaigns for collision detection
+model CampaignGroup {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  name            String
+  description     String?
+  collisionWindow Int             @default(86400)  // Seconds (default 24h)
+  collisionPolicy CollisionPolicy @default(HIGHEST_PRIORITY_WINS)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  singleSends SingleSend[]
+  sendLogs    SendLog[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+// Tracks sent emails for collision detection
+model SendLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  subjectId       String        // Recipient identifier from segment
+  campaignGroupId String
+  campaignGroup   CampaignGroup @relation(fields: [campaignGroupId], references: [id], onDelete: Cascade)
+  singleSendId    String
+  singleSend      SingleSend    @relation(fields: [singleSendId], references: [id], onDelete: Cascade)
+
+  sentAt DateTime @default(now())
+
+  @@index([workspaceId, subjectId, campaignGroupId, sentAt])
+  @@index([campaignGroupId])
+  @@index([singleSendId])
+}
+
+// =============================================================================
+// CONNECTORS
+// =============================================================================
+
+enum DataConnectorType {
+  POSTGRES
+  BIGQUERY
+}
+
+model DataConnector {
+  id          String            @id @default(cuid())
+  workspaceId String
+  workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  type   DataConnectorType
+  name   String
+  config Json                   // Encrypted credentials
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  segments Segment[]
+
+  @@index([workspaceId])
+}
+
+enum EmailProviderType {
+  SES
+  RESEND
+  SMTP
+}
+
+model EmailProviderConnector {
+  id          String            @id @default(cuid())
+  workspaceId String
+  workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  type   EmailProviderType
+  name   String
+  config Json                   // Encrypted credentials
+
+  // Webhook configuration - unique token for this provider's webhook URL
+  webhookToken String?          @unique  // e.g., "abc123" -> /webhooks/ses/abc123
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  senderProfiles SenderProfile[]
+
+  @@index([workspaceId])
+  @@index([webhookToken])
+}
+
+model SenderProfile {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  emailProviderConnectorId String
+  emailProviderConnector   EmailProviderConnector @relation(fields: [emailProviderConnectorId], references: [id], onDelete: Cascade)
+
+  name      String?   // Display name for this profile
+  fromEmail String
+  fromName  String?
+  replyTo   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  singleSends SingleSend[]
+
+  @@index([workspaceId])
+}
+
+// =============================================================================
+// TEMPLATES & COMPONENT LIBRARY
+// =============================================================================
+
+enum TemplateCategory {
+  MARKETING
+  TRANSACTIONAL
+  BOTH
+}
+
+model Template {
+  id          String           @id @default(cuid())
+  workspaceId String
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  key      String           @unique  // e.g. "welcome-email"
+  name     String
+  category TemplateCategory @default(MARKETING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions    TemplateVersion[]
+  singleSends SingleSend[]
+
+  @@index([workspaceId])
+}
+
+enum AuthoringMode {
+  RAW_HTML
+  RAW_MJML
+  UI_BUILDER
+}
+
+model TemplateVersion {
+  id         String   @id @default(cuid())
+  templateId String
+  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  version       Int           // Incrementing version number
+  subject       String
+  preheader     String?       // Preview text in inbox
+  bodyHtml      String?       // Final compiled HTML
+  bodyMjml      String?       // Source MJML (if mode = RAW_MJML)
+  builderSchema Json?         // Source JSON (if mode = UI_BUILDER)
+  mode          AuthoringMode
+  active        Boolean       @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([templateId, version])
+  @@index([templateId, active])
+}
+
+// Reusable email components (partials)
+enum ComponentType {
+  HEADER
+  FOOTER
+  BUTTON
+  CARD
+  DIVIDER
+  SNIPPET
+}
+
+enum ContentType {
+  MJML
+  HTML
+}
+
+model Component {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  name        String        // Unique name used in templates: {{> name }}
+  description String?
+  type        ComponentType
+  contentType ContentType   @default(MJML)
+  content     String        // The MJML or HTML content
+  variables   Json          @default("[]")  // Array of { name, type, defaultValue, description }
+  previewHtml String?       // Cached rendered preview
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+// =============================================================================
+// SEGMENTS
+// =============================================================================
+
+model Segment {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  name            String
+  description     String?
+  sqlQuery        String        // The SQL query to fetch recipients
+  dataConnectorId String
+  dataConnector   DataConnector @relation(fields: [dataConnectorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  singleSends SingleSend[]
+
+  @@index([workspaceId])
+}
+
+// =============================================================================
+// CAMPAIGNS (SINGLE SENDS)
+// =============================================================================
+
+enum SingleSendStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+  COMPLETED
+}
+
+enum ScheduleType {
+  MANUAL
+  CRON
+}
+
+model SingleSend {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  status      SingleSendStatus @default(DRAFT)
+
+  // References
+  templateId      String
+  template        Template      @relation(fields: [templateId], references: [id])
+  segmentId       String
+  segment         Segment       @relation(fields: [segmentId], references: [id])
+  senderProfileId String
+  senderProfile   SenderProfile @relation(fields: [senderProfileId], references: [id])
+
+  // Campaign Group for collision detection
+  campaignGroupId String?
+  campaignGroup   CampaignGroup? @relation(fields: [campaignGroupId], references: [id], onDelete: SetNull)
+  priority        Int            @default(100)  // Lower = higher priority
+
+  // Scheduling
+  scheduleType   ScheduleType @default(MANUAL)
+  cronExpression String?
+
+  // Policies
+  policies Json?  // { rateLimitPerSecond, globalFrequencyCap, etc. }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  runs     SingleSendRun[]
+  sendLogs SendLog[]
+
+  @@index([workspaceId])
+  @@index([campaignGroupId])
+  @@index([status])
+}
+
+enum SingleSendRunStatus {
+  CREATED
+  AUDIENCE_BUILDING
+  AUDIENCE_READY
+  SENDING
+  COMPLETED
+  FAILED
+}
+
+model SingleSendRun {
+  id           String              @id @default(cuid())
+  singleSendId String
+  singleSend   SingleSend          @relation(fields: [singleSendId], references: [id], onDelete: Cascade)
+
+  status      SingleSendRunStatus @default(CREATED)
+  stats       Json?               // { total, sent, failed, skipped, skippedReasons }
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  recipients SingleSendRecipient[]
+
+  @@index([singleSendId])
+  @@index([status])
+}
+
+enum RecipientStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model SingleSendRecipient {
+  id        String        @id @default(cuid())
+  runId     String
+  run       SingleSendRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  subjectId  String          // Canonical user ID from segment
+  email      String
+  vars       Json?           // Template variables for this recipient
+  status     RecipientStatus @default(PENDING)
+  skipReason String?         // e.g., "collision:already_sent", "suppressed:bounce"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sends Send[]
+
+  @@unique([runId, subjectId])  // Idempotency within run
+  @@index([runId, status])
+}
+
+// =============================================================================
+// DELIVERY TRACKING
+// =============================================================================
+
+enum SendStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  BOUNCED
+  COMPLAINT
+  FAILED
+}
+
+model Send {
+  id String @id @default(cuid())
+
+  // Link to campaign recipient (nullable for transactional sends)
+  singleSendRecipientId String?
+  singleSendRecipient   SingleSendRecipient? @relation(fields: [singleSendRecipientId], references: [id], onDelete: Cascade)
+
+  // Idempotency and tracking
+  idempotencyKey    String     @unique
+  status            SendStatus @default(QUEUED)
+  providerMessageId String?    // Message ID from ESP (SES, Resend)
+  attempts          Int        @default(0)
+  lastError         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([singleSendRecipientId])
+}
+
+// =============================================================================
+// SUPPRESSION & PREFERENCES
+// =============================================================================
+
+enum SuppressionReason {
+  BOUNCE
+  COMPLAINT
+  UNSUBSCRIBE
+  MANUAL
+}
+
+model Suppression {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  email  String
+  reason SuppressionReason
+
+  createdAt DateTime @default(now())
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId])
+}
+
+model Preference {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  email    String
+  category String   // e.g., "marketing", "product_updates"
+  optedIn  Boolean  @default(true)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, email, category])
+  @@index([workspaceId, email])
+}
+
+// =============================================================================
+// SYSTEM
+// =============================================================================
+
+model DeadLetter {
+  id        String   @id @default(cuid())
+  jobId     String?
+  queueName String
+  payload   Json
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([queueName])
+  @@index([createdAt])
+}
+
+// Analytics aggregates (for dashboard performance)
+model DailyStats {
+  id   String   @id @default(cuid())
+  date DateTime @db.Date
+
+  totalSent      Int @default(0)
+  totalDelivered Int @default(0)
+  totalBounced   Int @default(0)
+  totalFailed    Int @default(0)
+  totalSkipped   Int @default(0)
+
+  // Breakdown by skip reason
+  skippedCollision   Int @default(0)
+  skippedSuppression Int @default(0)
+  skippedOther       Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date])
+  @@index([date])
+}

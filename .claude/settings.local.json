@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs:*)",
+      "Bash(git -C /Users/ellion/Projects/Private/email-ops log --oneline -20)",
+      "Bash(find:*)",
+      "Bash(npm run build:*)",
+      "Bash(pnpm test:*)",
+      "Bash(done)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm --filter=api exec tsc:*)",
+      "Bash(pnpm --filter=worker exec tsc:*)",
+      "Bash(pnpm --filter=web exec tsc --noEmit)",
+      "Bash(pnpm --filter=core exec tsc --noEmit)",
+      "Bash(pnpm --filter=@email-ops/core exec tsc:*)",
+      "Bash(pnpm --filter=@email-ops/core build:*)",
+      "Bash(pnpm --filter=api test -- --testPathPattern=collision.service.spec --no-coverage)",
+      "Bash(pnpm --filter=api test:*)",
+      "Bash(pnpm --filter=api run db:generate)",
+      "Bash(pnpm --filter=api run test:unit)",
+      "Bash(pnpm --filter=api run build:*)",
+      "Bash(npx tsc:*)",
+      "Bash(pnpm --filter=api run dev)",
+      "Bash(pkill:*)",
+      "Bash(ls:*)",
+      "Bash(echo:*)",
+      "Bash(npx prisma:*)",
+      "Bash(pnpm --filter=api exec prisma validate:*)"
+    ]
+  }
+}

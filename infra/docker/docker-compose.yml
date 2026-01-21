@@ -1,0 +1,66 @@
+name: email-ops
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: emailops
+    ports:
+      - "3303:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "3302:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "3300:3000"
+    environment:
+      DATABASE_URL: postgres://user:password@postgres:5432/emailops
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      - postgres
+      - redis
+    # For dev, mount volumes or use dev command
+    command: sh -c "pnpm db:push && pnpm --filter api start:dev"
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    ports:
+      - "3301:3001"
+    environment:
+      DATABASE_URL: postgres://user:password@postgres:5432/emailops
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      WORKER_PORT: 3001
+    depends_on:
+      - postgres
+      - redis
+    command: pnpm --filter worker start:dev
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3304:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3300
+    depends_on:
+      - api
+    command: pnpm --filter web dev
+
+volumes:
+  postgres_data:
