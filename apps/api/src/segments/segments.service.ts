@@ -220,11 +220,82 @@ export class SegmentsService {
     }
   }
 
+  // Column name variants accepted by the segment processor
+  private static readonly ID_COLUMNS = ['subject_id', 'subjectid', 'recipient_id', 'recipientid', 'id'];
+  private static readonly EMAIL_COLUMNS = ['email', 'email_address'];
+  private static readonly VARS_COLUMNS = ['vars', 'variables', 'vars_json'];
+
+  private validateResultColumns(rows: any[]): {
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+    foundColumns: { id?: string; email?: string; vars?: string };
+  } {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const foundColumns: { id?: string; email?: string; vars?: string } = {};
+
+    if (rows.length === 0) {
+      return { valid: true, errors, warnings, foundColumns };
+    }
+
+    const sampleRow = rows[0];
+    const columnNames = Object.keys(sampleRow).map(c => c.toLowerCase());
+
+    // Check for ID column
+    const idColumn = SegmentsService.ID_COLUMNS.find(c => columnNames.includes(c));
+    if (idColumn) {
+      foundColumns.id = idColumn;
+    } else {
+      errors.push(`Missing ID column. Must include one of: ${SegmentsService.ID_COLUMNS.join(', ')}`);
+    }
+
+    // Check for email column
+    const emailColumn = SegmentsService.EMAIL_COLUMNS.find(c => columnNames.includes(c));
+    if (emailColumn) {
+      foundColumns.email = emailColumn;
+    } else {
+      errors.push(`Missing email column. Must include one of: ${SegmentsService.EMAIL_COLUMNS.join(', ')}`);
+    }
+
+    // Check for vars column (optional but recommended)
+    const varsColumn = SegmentsService.VARS_COLUMNS.find(c => columnNames.includes(c));
+    if (varsColumn) {
+      foundColumns.vars = varsColumn;
+    } else {
+      // Check if there are extra columns that could be template variables
+      const knownColumns = [...SegmentsService.ID_COLUMNS, ...SegmentsService.EMAIL_COLUMNS, ...SegmentsService.VARS_COLUMNS];
+      const extraColumns = columnNames.filter(c => !knownColumns.includes(c));
+      if (extraColumns.length > 0) {
+        warnings.push(
+          `Extra columns found (${extraColumns.join(', ')}) but no vars/variables column. ` +
+          `These won't be available as template variables. Use: SELECT ..., json_build_object('key', value) as vars`
+        );
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings,
+      foundColumns,
+    };
+  }
+
   async dryRun(
     workspaceId: string,
     id: string,
     input: { limit?: number } = {}
-  ): Promise<{ count: number; rows: any[] }> {
+  ): Promise<{
+    count: number;
+    rows: any[];
+    validation: {
+      valid: boolean;
+      errors: string[];
+      warnings: string[];
+      foundColumns: { id?: string; email?: string; vars?: string };
+    };
+  }> {
     const segment = await this.prisma.segment.findFirst({
       where: { id, workspaceId },
       include: { dataConnector: true },
@@ -267,7 +338,11 @@ export class SegmentsService {
       const rows = Array.isArray(previewRes?.rows) ? previewRes.rows : [];
 
       await client.query("COMMIT");
-      return { count, rows };
+
+      // Validate the result columns
+      const validation = this.validateResultColumns(rows);
+
+      return { count, rows, validation };
     } catch (e: any) {
       try {
         await client.query("ROLLBACK");

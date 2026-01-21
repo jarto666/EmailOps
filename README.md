@@ -154,6 +154,67 @@ make clean            # Deep clean (node_modules, dist, .next)
 make help             # Show all available commands
 ```
 
+## Demo Mode
+
+Demo mode provides a self-contained environment for testing and presentations. It includes:
+- **Mailpit** - SMTP catcher with web UI to view sent emails
+- **Demo Postgres** - Pre-seeded database with 500 test users
+- **Event Simulation** - UI to trigger delivery/bounce/complaint events
+
+### Demo Ports (separate from dev)
+
+| Service | Port |
+|---------|------|
+| EmailOps Postgres | 3310 |
+| Demo Postgres | 3311 |
+| Redis | 3312 |
+| Mailpit UI | 3313 |
+| Mailpit SMTP | 3314 |
+
+### Quick Start Demo
+
+```bash
+# Option 1: Full reset (recommended for first time)
+make demo-up      # Start Docker services
+make demo-seed    # Push schema + seed demo data
+make demo-dev     # Start app in demo mode
+
+# Option 2: One command to rule them all
+make demo-reset   # Does everything: down -v, up, seed
+make demo-dev     # Start app
+```
+
+### What Gets Seeded
+
+The demo seed creates everything you need:
+- **Email Connector**: SMTP to Mailpit (localhost:3314)
+- **Data Connector**: Postgres to demo DB (localhost:3311)
+- **Sender Profile**: hello@demo.emailops.com
+- **Template**: Welcome email with MJML
+- **Segment**: "Active Marketing Users" (10 users)
+- **Campaign Group**: With collision detection
+- **Campaign**: "Demo Welcome Campaign" (ready to trigger)
+
+### Try It Out
+
+1. Open http://localhost:3030/campaigns
+2. Click "Demo Welcome Campaign"
+3. Click **Trigger** to send emails
+4. View emails at http://localhost:3313 (Mailpit)
+5. Use **Demo Tools** (`/demo-tools`) to simulate bounces/complaints
+
+### Demo Make Commands
+
+```bash
+make demo-up          # Start demo Docker services
+make demo-seed        # Push schema + seed demo data
+make demo-dev         # Start app with DEMO_MODE=true
+make demo-reset       # Full reset (down -v, up, seed)
+make demo-down        # Stop demo services
+make demo-logs        # View Docker logs
+make demo-open        # Open Mailpit in browser
+```
+
 ## API Endpoints
 
 ### Core Resources
@@ -199,7 +260,7 @@ pnpm test:integration
 - [x] API endpoints (all CRUD operations)
 - [x] Web UI (all pages)
 - [x] Data connectors (Postgres, BigQuery)
-- [x] Email connectors (SES)
+- [x] Email connectors (SES, SMTP)
 - [x] Template system (HTML, MJML, UI Builder)
 - [x] Segment editor with SQL validation
 - [x] Campaign groups with collision policies
@@ -212,13 +273,14 @@ pnpm test:integration
 - [x] Collision detection (audience build + send time)
 - [x] Rate limiting (Redis-backed)
 - [x] Suppression management
+- [x] Demo mode with Mailpit & event simulation
 
 ### Planned
 
 - [ ] Transactional email API
 - [ ] Journey automation
 - [ ] A/B testing
-- [ ] Resend/SMTP provider support
+- [ ] Resend provider support
 
 ## License
 

@@ -633,6 +633,52 @@ export const suppressions = {
 };
 
 // =============================================================================
+// DEMO TOOLS
+// =============================================================================
+
+export interface DemoSend {
+  id: string;
+  email: string;
+  subjectId: string;
+  status: "QUEUED" | "SENT" | "DELIVERED" | "BOUNCED" | "FAILED" | "COMPLAINT";
+  campaignName: string;
+  campaignId: string | null;
+  createdAt: string;
+  providerMessageId: string | null;
+}
+
+export interface DemoEventResult {
+  ok: boolean;
+  event: "delivery" | "bounce" | "complaint";
+  sendId: string;
+  email: string;
+  newStatus: string;
+  suppressionAdded?: boolean;
+  bounceType?: "hard" | "soft";
+}
+
+export const demo = {
+  isEnabled: () => request<{ enabled: boolean }>("/demo/enabled"),
+  listRecentSends: (limit = 50) =>
+    request<DemoSend[]>("/demo/sends", { params: { limit } }),
+  simulateDelivery: (sendId: string) =>
+    request<DemoEventResult>(`/demo/sends/${sendId}/deliver`, {
+      method: "POST",
+      body: {},
+    }),
+  simulateBounce: (sendId: string, bounceType: "hard" | "soft" = "hard") =>
+    request<DemoEventResult>(`/demo/sends/${sendId}/bounce`, {
+      method: "POST",
+      body: { bounceType },
+    }),
+  simulateComplaint: (sendId: string) =>
+    request<DemoEventResult>(`/demo/sends/${sendId}/complaint`, {
+      method: "POST",
+      body: {},
+    }),
+};
+
+// =============================================================================
 // API OBJECT EXPORT
 // =============================================================================
 
@@ -647,6 +693,7 @@ export const api = {
   emailConnectors,
   senderProfiles,
   suppressions,
+  demo,
 };
 
 export default api;

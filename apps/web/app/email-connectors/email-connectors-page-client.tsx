@@ -134,15 +134,17 @@ function CreateConnectorModal({
     } else if (type === "RESEND") {
       return resendConfig;
     } else {
-      return {
+      const config: Record<string, unknown> = {
         host: smtpConfig.host,
         port: smtpConfig.port,
         secure: smtpConfig.secure,
-        auth: {
-          user: smtpConfig.username,
-          pass: smtpConfig.password,
-        },
       };
+      // Only include auth if both username and password are provided
+      if (smtpConfig.username && smtpConfig.password) {
+        config.user = smtpConfig.username;
+        config.pass = smtpConfig.password;
+      }
+      return config;
     }
   };
 
@@ -161,11 +163,8 @@ function CreateConnectorModal({
       if (type === "RESEND" && !resendConfig.apiKey) {
         throw new Error("API Key is required");
       }
-      if (
-        type === "SMTP" &&
-        (!smtpConfig.host || !smtpConfig.username || !smtpConfig.password)
-      ) {
-        throw new Error("Host, username, and password are required");
+      if (type === "SMTP" && !smtpConfig.host) {
+        throw new Error("Host is required");
       }
       setTestResult({ success: true });
     } catch (err) {
@@ -395,7 +394,7 @@ function CreateConnectorModal({
                 </label>
               </div>
               <div>
-                <label className="label">Username</label>
+                <label className="label">Username (optional)</label>
                 <input
                   type="text"
                   className="input"
@@ -404,11 +403,10 @@ function CreateConnectorModal({
                   onChange={(e) =>
                     setSmtpConfig((c) => ({ ...c, username: e.target.value }))
                   }
-                  required
                 />
               </div>
               <div>
-                <label className="label">Password</label>
+                <label className="label">Password (optional)</label>
                 <input
                   type="password"
                   className="input"
@@ -417,7 +415,6 @@ function CreateConnectorModal({
                   onChange={(e) =>
                     setSmtpConfig((c) => ({ ...c, password: e.target.value }))
                   }
-                  required
                 />
               </div>
             </div>

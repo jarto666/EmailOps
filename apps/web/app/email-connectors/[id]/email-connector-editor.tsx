@@ -99,15 +99,13 @@ const configFieldsByType: Record<string, ConfigField[]> = {
       key: "user",
       label: "Username",
       type: "text",
-      placeholder: "user@example.com",
-      required: true,
+      placeholder: "user@example.com (optional)",
     },
     {
       key: "pass",
       label: "Password",
       type: "password",
-      placeholder: "Your password",
-      required: true,
+      placeholder: "Your password (optional)",
     },
     {
       key: "secure",
@@ -784,8 +782,8 @@ export default function EmailConnectorEditor({
                   )}
                   {type === "SMTP" && (
                     <>
-                      Configure host, port, user, and password for your SMTP
-                      server.
+                      Configure host and port for your SMTP server. Username and
+                      password are optional (e.g., for Mailpit).
                     </>
                   )}
                 </p>

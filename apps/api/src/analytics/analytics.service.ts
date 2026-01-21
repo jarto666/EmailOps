@@ -36,9 +36,14 @@ export class AnalyticsService {
       statsMap.set(stat.status, stat._count);
     }
 
-    const totalSent = (statsMap.get('SENT') ?? 0) + (statsMap.get('DELIVERED') ?? 0);
+    // Total sent = all emails that left the system (SENT + DELIVERED + BOUNCED + COMPLAINT)
+    const totalSent = (statsMap.get('SENT') ?? 0) +
+                      (statsMap.get('DELIVERED') ?? 0) +
+                      (statsMap.get('BOUNCED') ?? 0) +
+                      (statsMap.get('COMPLAINT') ?? 0);
     const totalDelivered = statsMap.get('DELIVERED') ?? 0;
-    const totalBounced = statsMap.get('BOUNCED') ?? 0;
+    // Bounced includes both bounces and complaints
+    const totalBounced = (statsMap.get('BOUNCED') ?? 0) + (statsMap.get('COMPLAINT') ?? 0);
     const totalFailed = statsMap.get('FAILED') ?? 0;
     const deliveryRate = totalSent > 0 ? (totalDelivered / totalSent) * 100 : 0;
 
@@ -63,8 +68,17 @@ export class AnalyticsService {
     };
   }
 
+  // Helper to format date as YYYY-MM-DD in local timezone (avoiding UTC conversion issues)
+  private formatDateLocal(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   async getDailyMetrics(workspaceId: string, days: number = 30): Promise<DailyMetric[]> {
-    const startDate = new Date();
+    const now = new Date();
+    const startDate = new Date(now);
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
 
@@ -78,7 +92,7 @@ export class AnalyticsService {
 
     if (dailyStats.length > 0) {
       return dailyStats.map((stat) => ({
-        date: stat.date.toISOString().split('T')[0],
+        date: this.formatDateLocal(stat.date),
         sent: stat.totalSent,
         delivered: stat.totalDelivered,
         bounced: stat.totalBounced,
@@ -97,14 +111,14 @@ export class AnalyticsService {
       },
     });
 
-    // Group by date
+    // Group by date - use local date formatting
     const metricsByDate = new Map<string, DailyMetric>();
 
-    // Initialize all dates
+    // Initialize all dates (from startDate to today inclusive)
     for (let i = 0; i <= days; i++) {
       const date = new Date(startDate);
       date.setDate(date.getDate() + i);
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = this.formatDateLocal(date);
       metricsByDate.set(dateStr, {
         date: dateStr,
         sent: 0,
@@ -114,18 +128,21 @@ export class AnalyticsService {
       });
     }
 
-    // Aggregate sends
+    // Aggregate sends - convert createdAt to local date
     for (const send of sends) {
-      const dateStr = send.createdAt.toISOString().split('T')[0];
+      const sendDate = new Date(send.createdAt);
+      const dateStr = this.formatDateLocal(sendDate);
       const metric = metricsByDate.get(dateStr);
       if (metric) {
-        if (send.status === 'SENT' || send.status === 'DELIVERED') {
+        // Count SENT, DELIVERED, and COMPLAINT as "sent" (emails that left the system)
+        if (send.status === 'SENT' || send.status === 'DELIVERED' || send.status === 'BOUNCED' || send.status === 'COMPLAINT') {
           metric.sent++;
         }
         if (send.status === 'DELIVERED') {
           metric.delivered++;
         }
-        if (send.status === 'BOUNCED') {
+        // Count both BOUNCED and COMPLAINT as bounced
+        if (send.status === 'BOUNCED' || send.status === 'COMPLAINT') {
           metric.bounced++;
         }
         if (send.status === 'FAILED') {
@@ -152,6 +169,7 @@ export class AnalyticsService {
             status: true,
             stats: true,
             createdAt: true,
+            completedAt: true,
           },
         },
       },
@@ -159,18 +177,60 @@ export class AnalyticsService {
       take: limit,
     });
 
-    return campaigns.map((campaign) => ({
-      id: campaign.id,
-      name: campaign.name,
-      status: campaign.status,
-      templateName: campaign.template.name,
-      segmentName: campaign.segment.name,
-      campaignGroupName: campaign.campaignGroup?.name,
-      priority: campaign.priority,
-      lastRun: campaign.runs[0] ?? null,
-      createdAt: campaign.createdAt,
-      updatedAt: campaign.updatedAt,
-    }));
+    // Get per-campaign stats from Send table
+    const campaignIds = campaigns.map(c => c.id);
+    const campaignDeliveryStats = new Map<string, { sent: number; delivered: number }>();
+    for (const campaignId of campaignIds) {
+      const stats = await this.prisma.send.groupBy({
+        by: ['status'],
+        where: {
+          singleSendRecipient: {
+            run: {
+              singleSendId: campaignId,
+            },
+          },
+        },
+        _count: true,
+      });
+
+      let sent = 0;
+      let delivered = 0;
+      for (const stat of stats) {
+        // Count all emails that left the system
+        if (['SENT', 'DELIVERED', 'BOUNCED', 'COMPLAINT'].includes(stat.status)) {
+          sent += stat._count;
+        }
+        if (stat.status === 'DELIVERED') {
+          delivered += stat._count;
+        }
+      }
+      campaignDeliveryStats.set(campaignId, { sent, delivered });
+    }
+
+    return campaigns.map((campaign) => {
+      const lastRun = campaign.runs[0] ?? null;
+      const deliveryStats = campaignDeliveryStats.get(campaign.id) ?? { sent: 0, delivered: 0 };
+
+      const totalSent = deliveryStats.sent;
+      const totalDelivered = deliveryStats.delivered;
+      const deliveryRate = totalSent > 0 ? (totalDelivered / totalSent) * 100 : 0;
+
+      return {
+        id: campaign.id,
+        name: campaign.name,
+        status: campaign.status,
+        templateName: campaign.template?.name,
+        segmentName: campaign.segment?.name,
+        campaignGroupName: campaign.campaignGroup?.name,
+        priority: campaign.priority,
+        // Flat properties expected by frontend
+        lastRunAt: lastRun?.completedAt ?? lastRun?.createdAt ?? null,
+        totalSent,
+        deliveryRate: Math.round(deliveryRate * 10) / 10,
+        createdAt: campaign.createdAt,
+        updatedAt: campaign.updatedAt,
+      };
+    });
   }
 
   async getCampaignStats(workspaceId: string, campaignId: string) {

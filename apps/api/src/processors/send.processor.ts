@@ -6,6 +6,7 @@ import { AuthoringMode, EmailProviderType, SingleSendRunStatus } from "@prisma/c
 import { RecipientStatus, SendStatus } from "@prisma/client";
 import { EmailCompiler } from "../lib/email";
 import { SesService } from "../lib/ses";
+import { SmtpService, SmtpConfig } from "../lib/smtp";
 import { PrismaService } from "../prisma/prisma.service";
 import { CollisionService } from "./services/collision.service";
 
@@ -87,6 +88,23 @@ export class SendProcessor extends WorkerHost {
       throw new BadRequestException("SES config must include `secretAccessKey`.");
     }
     return { region, accessKeyId, secretAccessKey };
+  }
+
+  private normalizeSmtpConfig(raw: Record<string, any>): SmtpConfig {
+    const host = raw?.host;
+    const port = raw?.port;
+    if (typeof host !== "string" || host.length === 0) {
+      throw new BadRequestException("SMTP config must include `host`.");
+    }
+    if (typeof port !== "number" && typeof port !== "string") {
+      throw new BadRequestException("SMTP config must include `port`.");
+    }
+    return {
+      host,
+      port: typeof port === "number" ? port : parseInt(port, 10),
+      secure: raw?.secure ?? false,
+      auth: raw?.user && raw?.pass ? { user: raw.user, pass: raw.pass } : undefined,
+    };
   }
 
   private async applyRateLimit(senderProfileId: string, ratePerSecond: number) {
@@ -260,34 +278,53 @@ export class SendProcessor extends WorkerHost {
       : senderProfile.fromEmail;
 
     try {
-      if (connector.type !== EmailProviderType.SES) {
+      let messageId: string | undefined;
+
+      if (connector.type === EmailProviderType.SES) {
+        const sesCfg = this.normalizeSesConfig(
+          this.decryptConnectorConfig(connector.config)
+        );
+        const ses = new SesService(sesCfg.region, {
+          accessKeyId: sesCfg.accessKeyId,
+          secretAccessKey: sesCfg.secretAccessKey,
+        });
+
+        console.log(`Sending email via SES to ${rr.email} from ${from}`);
+        const resp: any = await ses.sendEmail({
+          from,
+          to: [rr.email],
+          subject: compiled.subject,
+          html: compiled.html,
+        });
+        messageId = resp?.MessageId ?? resp?.messageId;
+      } else if (connector.type === EmailProviderType.SMTP) {
+        const smtpCfg = this.normalizeSmtpConfig(
+          this.decryptConnectorConfig(connector.config)
+        );
+        const smtp = new SmtpService(smtpCfg);
+
+        console.log(`Sending email via SMTP to ${rr.email} from ${from}`);
+        const resp = await smtp.sendEmail({
+          from,
+          to: [rr.email],
+          subject: compiled.subject,
+          html: compiled.html,
+        });
+        messageId = resp.messageId;
+      } else {
         throw new BadRequestException(
           `Sending not implemented for connector type: ${connector.type}`
         );
       }
-      const sesCfg = this.normalizeSesConfig(
-        this.decryptConnectorConfig(connector.config)
-      );
-      const ses = new SesService(sesCfg.region, {
-        accessKeyId: sesCfg.accessKeyId,
-        secretAccessKey: sesCfg.secretAccessKey,
-      });
 
-      console.log(`Sending email to ${rr.email} from ${from}`);
-      const resp: any = await ses.sendEmail({
-        from,
-        to: [rr.email],
-        subject: compiled.subject,
-        html: compiled.html,
-      });
-      console.log(`Email sent successfully to ${rr.email}, messageId=${resp?.MessageId}`);
+      console.log(`Email sent successfully to ${rr.email}, messageId=${messageId}`);
 
       await this.prisma.$transaction([
         this.prisma.send.update({
           where: { id: send.id },
           data: {
             status: SendStatus.SENT,
-            providerMessageId: resp?.MessageId ?? resp?.messageId ?? undefined,
+            providerMessageId: messageId,
           },
         }),
         this.prisma.singleSendRecipient.update({
@@ -309,7 +346,7 @@ export class SendProcessor extends WorkerHost {
       // Check if all recipients are done and update run status
       await this.checkAndCompleteRun(rr.runId);
 
-      return { ok: true, status: "sent", messageId: resp?.MessageId ?? null };
+      return { ok: true, status: "sent", messageId: messageId ?? null };
     } catch (e: any) {
       console.error(`Error sending email to ${rr.email}: ${e?.message ?? e}`);
       // If this is the last attempt, mark as failed; otherwise allow retry.
@@ -395,35 +432,52 @@ export class SendProcessor extends WorkerHost {
       : senderProfile.fromEmail;
 
     try {
-      if (connector.type !== EmailProviderType.SES) {
+      let messageId: string | undefined;
+
+      if (connector.type === EmailProviderType.SES) {
+        const sesCfg = this.normalizeSesConfig(
+          this.decryptConnectorConfig(connector.config)
+        );
+        const ses = new SesService(sesCfg.region, {
+          accessKeyId: sesCfg.accessKeyId,
+          secretAccessKey: sesCfg.secretAccessKey,
+        });
+
+        const resp: any = await ses.sendEmail({
+          from,
+          to: [String(to)],
+          subject: compiled.subject,
+          html: compiled.html,
+        });
+        messageId = resp?.MessageId ?? resp?.messageId;
+      } else if (connector.type === EmailProviderType.SMTP) {
+        const smtpCfg = this.normalizeSmtpConfig(
+          this.decryptConnectorConfig(connector.config)
+        );
+        const smtp = new SmtpService(smtpCfg);
+
+        const resp = await smtp.sendEmail({
+          from,
+          to: [String(to)],
+          subject: compiled.subject,
+          html: compiled.html,
+        });
+        messageId = resp.messageId;
+      } else {
         throw new BadRequestException(
           `Sending not implemented for connector type: ${connector.type}`
         );
       }
-      const sesCfg = this.normalizeSesConfig(
-        this.decryptConnectorConfig(connector.config)
-      );
-      const ses = new SesService(sesCfg.region, {
-        accessKeyId: sesCfg.accessKeyId,
-        secretAccessKey: sesCfg.secretAccessKey,
-      });
-
-      const resp: any = await ses.sendEmail({
-        from,
-        to: [String(to)],
-        subject: compiled.subject,
-        html: compiled.html,
-      });
 
       await this.prisma.send.update({
         where: { id: send.id },
         data: {
           status: SendStatus.SENT,
-          providerMessageId: resp?.MessageId ?? resp?.messageId ?? undefined,
+          providerMessageId: messageId,
         },
       });
 
-      return { ok: true, status: "sent", messageId: resp?.MessageId ?? null };
+      return { ok: true, status: "sent", messageId: messageId ?? null };
     } catch (e: any) {
       const isFinalAttempt =
         (job.opts.attempts ?? 1) <= (job.attemptsMade ?? 0) + 1;

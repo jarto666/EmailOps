@@ -25,7 +25,8 @@
       "Bash(ls:*)",
       "Bash(echo:*)",
       "Bash(npx prisma:*)",
-      "Bash(pnpm --filter=api exec prisma validate:*)"
+      "Bash(pnpm --filter=api exec prisma validate:*)",
+      "Bash(npx dotenv-cli:*)"
     ]
   }
 }

@@ -80,38 +80,101 @@
       "command": "make up",
       "problemMatcher": []
     },
-    {
-      "label": "docker:down",
-      "type": "shell",
-      "command": "make down",
-      "problemMatcher": []
-    },
-    {
-      "label": "docker:logs",
-      "type": "shell",
-      "command": "make logs",
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always"
-      }
-    },
-    {
-      "label": "lint",
-      "type": "shell",
-      "command": "make lint",
-      "problemMatcher": []
-    },
-    {
-      "label": "format",
-      "type": "shell",
-      "command": "make format",
-      "problemMatcher": []
-    },
+    // {
+    //   "label": "docker:down",
+    //   "type": "shell",
+    //   "command": "make down",
+    //   "problemMatcher": []
+    // },
+    // {
+    //   "label": "docker:logs",
+    //   "type": "shell",
+    //   "command": "make logs",
+    //   "problemMatcher": [],
+    //   "presentation": {
+    //     "reveal": "always"
+    //   }
+    // },
+    // {
+    //   "label": "lint",
+    //   "type": "shell",
+    //   "command": "make lint",
+    //   "problemMatcher": []
+    // },
+    // {
+    //   "label": "format",
+    //   "type": "shell",
+    //   "command": "make format",
+    //   "problemMatcher": []
+    // },
     {
       "label": "clean",
       "type": "shell",
       "command": "make clean",
       "problemMatcher": []
+    },
+    {
+      "label": "demo:up",
+      "type": "shell",
+      "command": "make demo-up",
+      "problemMatcher": [],
+      "detail": "Start demo environment (DB, Redis, Mailpit)"
+    },
+    {
+      "label": "demo:down",
+      "type": "shell",
+      "command": "make demo-down",
+      "problemMatcher": [],
+      "detail": "Stop demo environment"
+    },
+    {
+      "label": "demo:dev",
+      "type": "shell",
+      "command": "make demo-dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": ".*"
+        }
+      },
+      "detail": "Start app in demo mode (DEMO_MODE=true)"
+    },
+    {
+      "label": "demo:logs",
+      "type": "shell",
+      "command": "make demo-logs",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always"
+      },
+      "detail": "View demo Docker logs"
+    },
+    // {
+    //   "label": "demo:open-mailpit",
+    //   "type": "shell",
+    //   "command": "make demo-open",
+    //   "problemMatcher": [],
+    //   "detail": "Open Mailpit UI in browser"
+    // },
+    {
+      "label": "demo:seed",
+      "type": "shell",
+      "command": "make demo-seed",
+      "problemMatcher": [],
+      "detail": "Push schema and seed demo data"
+    },
+    {
+      "label": "demo:reset",
+      "type": "shell",
+      "command": "make demo-reset",
+      "problemMatcher": [],
+      "detail": "Full reset: destroy, recreate, and seed demo environment"
     }
   ]
 }

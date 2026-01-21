@@ -20,6 +20,7 @@ import {
   Ban,
   BarChart3,
   BookOpen,
+  Beaker,
 } from 'lucide-react';
 
 const navigation = [
@@ -64,6 +65,7 @@ const navigation = [
     items: [
       { name: 'Settings', href: '/settings', icon: Settings },
       { name: 'Guide', href: '/guide', icon: BookOpen },
+      { name: 'Demo Tools', href: '/demo-tools', icon: Beaker },
     ],
   },
 ];

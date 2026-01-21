@@ -193,6 +193,40 @@ export class EmailConnectorsService {
         await client.send(new GetAccountCommand({}));
         return { ok: true };
       }
+      case EmailProviderType.SMTP: {
+        const host = config?.host;
+        const port = config?.port;
+        if (!host || !port) {
+          throw new BadRequestException(
+            "SMTP config must include host and port",
+          );
+        }
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { SmtpService } = require("../lib/smtp") as any;
+        // Handle secure field - could be boolean or string "true"/"false"
+        let secure = false;
+        if (typeof config?.secure === "boolean") {
+          secure = config.secure;
+        } else if (typeof config?.secure === "string") {
+          secure = config.secure.toLowerCase() === "true";
+        }
+        const smtp = new SmtpService({
+          host,
+          port: typeof port === "number" ? port : parseInt(port, 10),
+          secure,
+          auth: config?.user && config?.pass
+            ? { user: config.user, pass: config.pass }
+            : undefined,
+        });
+        try {
+          await smtp.verify();
+          return { ok: true };
+        } catch (err: any) {
+          throw new BadRequestException(
+            `SMTP connection failed: ${err.message || "Unknown error"}`,
+          );
+        }
+      }
       default:
         throw new BadRequestException(
           `testConnection not implemented for email provider: ${type}`,

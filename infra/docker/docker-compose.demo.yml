@@ -1,0 +1,49 @@
+name: email-ops-demo
+version: "3.8"
+
+# Demo environment uses different ports to avoid conflicts with dev environment
+# Dev ports: 3300-3304
+# Demo ports: 3310-3314
+
+services:
+  # Main database for EmailOps
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: emailops
+    ports:
+      - "3310:5432"
+    volumes:
+      - demo_postgres_data:/var/lib/postgresql/data
+
+  # Demo database with test data (simulates customer database)
+  demo-postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB: demo
+    ports:
+      - "3311:5432"
+    volumes:
+      - ./demo-seed.sql:/docker-entrypoint-initdb.d/seed.sql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "3312:6379"
+
+  # Mailpit - SMTP catcher with web UI
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "3313:8025"   # Web UI - view caught emails at http://localhost:3313
+      - "3314:1025"   # SMTP - configure email connector to use this port
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+volumes:
+  demo_postgres_data:
