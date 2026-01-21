@@ -504,18 +504,482 @@ email-ops/
 
 ### 7.3 Unsubscribe Handling
 
-**Problem**: No way for recipients to unsubscribe directly from emails.
+**Problem**: No way for recipients to unsubscribe directly from emails. The existing `Suppression` model provides global blocking, but lacks category-based preferences (similar to SendGrid's Advanced Suppression Manager).
 
-**Planned Features:**
-- [ ] One-click unsubscribe link generation (`{{unsubscribeUrl}}`)
-- [ ] List-Unsubscribe header (RFC 8058) for email clients
-- [ ] Hosted unsubscribe landing page
-- [ ] Preference center (manage subscription categories)
-- [ ] Re-subscribe flow with confirmation
-- [ ] Unsubscribe webhook notifications
-- [ ] Automatic footer injection with unsubscribe link
+#### Identity Model
 
-### 7.4 Additional Improvements
+**Key Design Decision**: Suppressions and preferences are keyed by **email address** (not subjectId):
+
+- **Legal Compliance**: CAN-SPAM and GDPR require honoring unsubscribes per email address
+- **Reputation Protection**: ISPs track complaints per email, not per user identity
+- **User Re-registration**: If a user deletes their account and re-registers, suppressions persist (correct for compliance)
+- **SendLog**: Collision tracking uses subjectId (resets for new user accounts, which is desired behavior)
+
+#### Schema Changes
+
+**New Model: `UnsubscribeGroup`**
+
+```prisma
+model UnsubscribeGroup {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  name        String   // e.g., "Product Updates", "Marketing", "Tips & Tricks"
+  description String?  // Shown on preference center
+  isDefault   Boolean  @default(false) // One default group per workspace
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  singleSends SingleSend[]
+  preferences Preference[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+```
+
+**Update: `SingleSend` Model**
+
+```prisma
+model SingleSend {
+  // ... existing fields
+  unsubscribeGroupId String?
+  unsubscribeGroup   UnsubscribeGroup? @relation(fields: [unsubscribeGroupId], references: [id])
+}
+```
+
+**Update: `Preference` Model** (already exists, needs modification)
+
+```prisma
+model Preference {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  workspace          Workspace @relation(fields: [workspaceId], references: [id])
+  email              String   // Keyed by email for legal compliance
+  unsubscribeGroupId String
+  unsubscribeGroup   UnsubscribeGroup @relation(fields: [unsubscribeGroupId], references: [id])
+  optedIn            Boolean  @default(true)
+  updatedAt          DateTime @updatedAt
+
+  @@unique([workspaceId, email, unsubscribeGroupId])
+  @@index([workspaceId, email])
+}
+```
+
+#### API Endpoints
+
+**Unsubscribe Groups**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/unsubscribe-groups` | Create group |
+| GET | `/unsubscribe-groups` | List groups |
+| GET | `/unsubscribe-groups/:id` | Get group with stats |
+| PATCH | `/unsubscribe-groups/:id` | Update group |
+| DELETE | `/unsubscribe-groups/:id` | Delete group (fails if campaigns assigned) |
+
+**Preferences (Internal API for user app proxy)**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/preferences/:token` | Get preferences for email (via signed token) |
+| PATCH | `/preferences/:token` | Update preferences (opt-in/out per group) |
+| POST | `/preferences/:token/unsubscribe-all` | Global unsubscribe (adds to Suppression) |
+
+**Token Generation**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/unsubscribe/generate-token` | Generate signed token for email |
+
+#### Send-Time Check Flow
+
+The processor checks recipients in this order:
+
+```
+1. Suppression Check (global block)
+   └─ If suppressed (BOUNCE/COMPLAINT/UNSUBSCRIBE/MANUAL) → SKIP
+
+2. Preference Check (category opt-out)
+   └─ If campaign has unsubscribeGroupId AND email opted out → SKIP
+
+3. Collision Check (rate limiting)
+   └─ If collision policy blocks → SKIP
+
+4. SEND
+```
+
+**File Changes**: `apps/api/src/processors/segment.processor.ts`
+
+```typescript
+// After suppression check, before collision check:
+if (singleSend.unsubscribeGroupId) {
+  const prefs = await this.preferenceService.batchCheckPreferences(
+    workspaceId,
+    emails,
+    singleSend.unsubscribeGroupId
+  );
+  // Filter out opted-out recipients
+}
+```
+
+#### Unsubscribe Link Generation
+
+**Template Variable**: `{{unsubscribeUrl}}`
+
+Generated at send time with signed JWT token containing:
+- `workspaceId`
+- `email` (hashed or encrypted)
+- `unsubscribeGroupId` (optional)
+- `exp` (expiration, e.g., 1 year)
+
+**Example URL**:
+```
+https://your-app.com/unsubscribe?token=eyJhbGciOiJIUzI1NiIs...
+```
+
+#### Deployment Topology
+
+**Recommended**: User's app proxies to EmailOps (EmailOps stays internal)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Public Internet                       │
+└─────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                     User's App                           │
+│                                                          │
+│  /unsubscribe?token=xxx                                  │
+│    └─ Validates token                                    │
+│    └─ Calls EmailOps API (internal)                     │
+│    └─ Renders branded unsubscribe page                  │
+│    └─ Shows preference center                           │
+└─────────────────────────────────────────────────────────┘
+                           │
+                           ▼ (Internal network)
+┌─────────────────────────────────────────────────────────┐
+│                      EmailOps                            │
+│                                                          │
+│  PATCH /preferences/:token                               │
+│    └─ Updates Preference records                        │
+│    └─ Optionally adds global Suppression                │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### Migration from Existing System
+
+For users with existing preference columns (e.g., `receiveWelcomeTips`, `receiveProductUpdates`):
+
+1. **Create UnsubscribeGroups** in EmailOps matching your categories
+2. **Export preferences** from your user table
+3. **Import via API** or direct database insert:
+
+```sql
+INSERT INTO "Preference" ("id", "workspaceId", "email", "unsubscribeGroupId", "optedIn", "updatedAt")
+SELECT
+  gen_random_uuid(),
+  'workspace_id',
+  u.email,
+  'group_id_for_welcome_tips',
+  u."receiveWelcomeTips",
+  NOW()
+FROM users u
+WHERE u.email IS NOT NULL;
+```
+
+4. **Link SingleSends** to appropriate unsubscribe groups
+
+#### List-Unsubscribe Header (RFC 8058)
+
+Automatically inject header for one-click unsubscribe in email clients:
+
+```
+List-Unsubscribe: <https://your-app.com/unsubscribe?token=xxx&oneclick=true>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+#### Implementation Checklist
+
+- [ ] Add `UnsubscribeGroup` model to schema
+- [ ] Update `Preference` model with unsubscribeGroupId FK
+- [ ] Add `unsubscribeGroupId` to `SingleSend` model
+- [ ] Create unsubscribe-groups CRUD endpoints
+- [ ] Create preferences API endpoints (token-based)
+- [ ] Implement token generation (JWT-based)
+- [ ] Add preference check to segment processor
+- [ ] Add `{{unsubscribeUrl}}` variable to template rendering
+- [ ] Add List-Unsubscribe header to email sending
+- [ ] Create unsubscribe groups management UI
+- [ ] Document proxy pattern for user's app
+
+### 7.4 CSV Segments
+
+**Problem**: Currently segments only support SQL queries against connected databases. Users may want to send to a static list uploaded as CSV.
+
+#### Use Cases
+
+- One-time campaigns to a specific list (e.g., event attendees)
+- Testing with a small recipient list before connecting a database
+- Lists from external sources without database access
+- Quick ad-hoc sends without writing SQL
+
+#### Schema Changes
+
+**Update: `Segment` Model**
+
+```prisma
+enum SegmentType {
+  SQL      // Existing - query against data connector
+  CSV      // New - uploaded CSV file
+}
+
+model Segment {
+  // ... existing fields
+  type           SegmentType @default(SQL)
+  csvData        Json?       // Stored recipient list for CSV segments
+  csvRowCount    Int?        // Cached count for display
+  csvUploadedAt  DateTime?   // When CSV was last uploaded
+}
+```
+
+#### CSV Format
+
+Required columns:
+- `email` (required) - Recipient email address
+- `subject_id` (optional) - Unique identifier for collision tracking
+
+Optional columns (passed as template variables):
+- Any additional columns become `{{columnName}}` in templates
+
+**Example CSV:**
+```csv
+email,subject_id,first_name,company
+alice@example.com,user_123,Alice,Acme Corp
+bob@example.com,user_456,Bob,BigCo
+```
+
+#### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/segments/:id/upload-csv` | Upload CSV file (multipart/form-data) |
+| GET | `/segments/:id/csv-preview` | Preview first N rows |
+| DELETE | `/segments/:id/csv-data` | Clear CSV data |
+
+#### Processing Flow
+
+```
+1. User uploads CSV via UI or API
+2. Server parses CSV, validates required columns
+3. Data stored in segment.csvData as JSON array
+4. Row count cached in segment.csvRowCount
+
+At send time (segment.processor.ts):
+1. If segment.type === 'CSV':
+   - Read from segment.csvData instead of querying connector
+   - Apply same suppression/collision checks
+   - Enqueue sends as normal
+```
+
+#### File Size Limits
+
+- **Small lists** (< 10,000 rows): Store directly in `csvData` JSON field
+- **Large lists** (> 10,000 rows): Consider storing in separate table or object storage
+
+#### UI Changes
+
+**File**: `apps/web/app/segments/[id]/segment-editor.tsx`
+
+- Add segment type toggle (SQL / CSV)
+- For CSV type:
+  - File upload dropzone
+  - Preview table showing first 10 rows
+  - Row count display
+  - Column mapping validation
+  - Re-upload capability
+
+#### Implementation Checklist
+
+- [ ] Add `SegmentType` enum to schema
+- [ ] Add CSV fields to `Segment` model
+- [ ] Create CSV upload endpoint with validation
+- [ ] Create CSV preview endpoint
+- [ ] Update segment processor to handle CSV type
+- [ ] Add CSV upload UI to segment editor
+- [ ] Add CSV preview table component
+- [ ] Add file size validation (configurable limit)
+- [ ] Handle CSV parsing errors gracefully
+
+### 7.5 Email Verification / List Cleaning
+
+**Problem**: Sending to invalid emails hurts deliverability and sender reputation. Services like NeverBounce verify emails before sending.
+
+#### Two-Tier Approach
+
+**Tier 1: Built-in Basic Checks (Free, Instant)**
+- Email syntax validation (RFC 5322 regex)
+- MX record lookup (does domain accept email?)
+- Disposable domain blocklist (open source lists)
+- Role-based email detection (info@, support@, noreply@)
+
+**Tier 2: Deep Verification via Integration (Optional)**
+- Mailbox verification (SMTP handshake)
+- Catch-all detection
+- Spam trap detection
+- Deliverability scoring
+
+#### Supported Providers
+
+| Provider | API | Notes |
+|----------|-----|-------|
+| NeverBounce | `api.neverbounce.com` | Popular, good accuracy |
+| ZeroBounce | `api.zerobounce.net` | Abuse/spam trap detection |
+| Kickbox | `api.kickbox.com` | Simple, fast |
+
+#### Schema Changes
+
+```prisma
+enum EmailVerificationProvider {
+  NEVERBOUNCE
+  ZEROBOUNCE
+  KICKBOX
+}
+
+model EmailVerificationConnector {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  provider    EmailVerificationProvider
+  config      Json     // Encrypted API key
+  isEnabled   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, provider])
+}
+
+// Cache verification results to avoid re-checking
+model EmailVerificationCache {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  email        String
+  provider     EmailVerificationProvider
+  result       String   // "valid", "invalid", "risky", "unknown"
+  rawResponse  Json?    // Full provider response
+  verifiedAt   DateTime @default(now())
+  expiresAt    DateTime // Cache expiration
+
+  @@unique([workspaceId, email, provider])
+  @@index([workspaceId, email])
+  @@index([expiresAt])
+}
+```
+
+**Update: `SingleSend` Model**
+
+```prisma
+model SingleSend {
+  // ... existing fields
+  verifyEmails       Boolean @default(false)  // Enable deep verification
+  skipRiskyEmails    Boolean @default(true)   // Skip "risky" results
+  skipCatchAllEmails Boolean @default(false)  // Skip catch-all domains
+}
+```
+
+#### Verification Flow
+
+```
+Campaign Trigger:
+
+1. Build Audience (SQL/CSV)
+              ↓
+2. Basic Checks (built-in)           ← Free, instant
+   - Invalid syntax → SKIP (reason: "invalid_syntax")
+   - No MX record → SKIP (reason: "no_mx_record")
+   - Disposable domain → SKIP (reason: "disposable_domain")
+   - Role-based email → Flag (optional skip)
+              ↓
+3. Deep Verification (if enabled)    ← Via NeverBounce/etc
+   - Check cache first (avoid re-verification)
+   - Call provider API for uncached emails
+   - Invalid → SKIP (reason: "verification_invalid")
+   - Risky → SKIP if skipRiskyEmails (reason: "verification_risky")
+   - Catch-all → SKIP if skipCatchAllEmails (reason: "catch_all")
+   - Cache results
+              ↓
+4. Suppression Check
+              ↓
+5. Preference Check
+              ↓
+6. Collision Check
+              ↓
+7. Send
+```
+
+#### API Endpoints
+
+**Verification Connectors**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/email-verification-connectors` | Add verification provider |
+| GET | `/email-verification-connectors` | List connectors |
+| DELETE | `/email-verification-connectors/:id` | Remove connector |
+| POST | `/email-verification-connectors/:id/test` | Test API key |
+
+**Manual Verification**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/verify-email` | Verify single email |
+| POST | `/verify-emails` | Verify batch (for CSV preview) |
+
+#### UI Changes
+
+**Campaign Settings:**
+- Toggle: "Verify emails before sending"
+- Checkbox: "Skip risky emails"
+- Checkbox: "Skip catch-all domains"
+- Show estimated verification cost (count × provider rate)
+
+**Segment Preview:**
+- After dry-run, show verification status breakdown
+- Option to "Verify sample" (check 100 random emails)
+
+**Settings Page:**
+- Email verification connector management
+- Provider selection with API key input
+- Test connection button
+- Usage/cost display if provider supports it
+
+#### Built-in Disposable Domain List
+
+Use open-source lists (updated periodically):
+- https://github.com/disposable-email-domains/disposable-email-domains
+- Store in Redis or database table
+- Check during basic validation
+
+#### Implementation Checklist
+
+- [ ] Add `EmailVerificationProvider` enum to schema
+- [ ] Add `EmailVerificationConnector` model
+- [ ] Add `EmailVerificationCache` model
+- [ ] Add verification fields to `SingleSend` model
+- [ ] Implement basic checks (syntax, MX, disposable)
+- [ ] Create NeverBounce adapter
+- [ ] Create ZeroBounce adapter
+- [ ] Create Kickbox adapter
+- [ ] Add verification step to segment processor
+- [ ] Implement verification result caching
+- [ ] Create verification connector CRUD endpoints
+- [ ] Add verification settings to campaign UI
+- [ ] Add connector management to settings page
+- [ ] Bundle disposable domain list
+
+### 7.6 Additional Improvements
 
 - [ ] Email preview send (send test to specific address)
 - [ ] Template duplication
@@ -548,6 +1012,8 @@ email-ops/
 - [x] Webhook event processing (SES)
 - [ ] Visual template editor with preview
 - [ ] One-click unsubscribe in emails
+- [ ] CSV segment upload support
+- [ ] Email verification integration (NeverBounce, etc.)
 - [ ] Analytics with time-series charts
 - [ ] Open and click tracking
 - [ ] 80%+ test coverage

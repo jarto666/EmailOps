@@ -23,7 +23,7 @@ import { useToast } from "@/components/toast";
 
 type DryRunResult = {
   count: number;
-  sample: Record<string, unknown>[];
+  rows: Record<string, unknown>[];
 };
 
 export default function SegmentEditor({
@@ -372,7 +372,7 @@ export default function SegmentEditor({
               </div>
 
               {/* Results Table */}
-              {preview && preview.sample.length > 0 ? (
+              {preview && preview.rows.length > 0 ? (
                 <div className="border border-border-default rounded-lg overflow-hidden">
                   <div className="overflow-x-auto max-h-80">
                     <table className="w-full text-xs">
@@ -389,7 +389,7 @@ export default function SegmentEditor({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border-default">
-                        {preview.sample
+                        {preview.rows
                           .slice(0, previewLimit)
                           .map((row, idx) => (
                             <tr key={idx} className="hover:bg-background/50">
