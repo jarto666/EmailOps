@@ -29,5 +29,6 @@ wheels/
 *.egg
 MANIFEST
 
-# Web
+# App lib folders (not Python's lib/)
 !apps/web/lib/
+!apps/api/src/lib/
