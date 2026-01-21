@@ -34,8 +34,9 @@ async function bootstrap() {
     customCss: ".swagger-ui .topbar { display: none }",
   });
 
-  await app.listen(process.env.PORT || 3300);
-  console.log(`API running on port ${process.env.PORT || 3300}`);
-  console.log(`API docs available at http://localhost:${process.env.PORT || 3300}/api/docs`);
+  const port = process.env.PORT || 3300;
+  await app.listen(port, '0.0.0.0');
+  console.log(`API running on http://0.0.0.0:${port}`);
+  console.log(`API docs available at /api/docs`);
 }
 bootstrap();
