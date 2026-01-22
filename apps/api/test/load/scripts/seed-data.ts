@@ -35,6 +35,8 @@ interface SeedOptions {
   recipients: number;
   campaigns: number;
   campaignGroups: number;
+  batchSize: number;
+  rateLimitPerSecond: number;
 }
 
 function parseArgs(): SeedOptions {
@@ -43,6 +45,8 @@ function parseArgs(): SeedOptions {
     recipients: 1000,
     campaigns: 10,
     campaignGroups: 3,
+    batchSize: 50,           // Small batches for testing
+    rateLimitPerSecond: 100, // High rate for fast tests
   };
 
   for (const arg of args) {
@@ -50,6 +54,8 @@ function parseArgs(): SeedOptions {
     if (key === 'recipients') options.recipients = parseInt(value, 10);
     if (key === 'campaigns') options.campaigns = parseInt(value, 10);
     if (key === 'groups') options.campaignGroups = parseInt(value, 10);
+    if (key === 'batchSize') options.batchSize = parseInt(value, 10);
+    if (key === 'rateLimit') options.rateLimitPerSecond = parseInt(value, 10);
   }
 
   return options;
@@ -77,6 +83,8 @@ async function seed(options: SeedOptions) {
   console.log(`  Recipients: ${options.recipients}`);
   console.log(`  Campaigns: ${options.campaigns}`);
   console.log(`  Campaign Groups: ${options.campaignGroups}`);
+  console.log(`  Batch Size: ${options.batchSize}`);
+  console.log(`  Rate Limit: ${options.rateLimitPerSecond}/sec`);
 
   // Create workspace
   const workspace = await prisma.workspace.upsert({
@@ -88,6 +96,25 @@ async function seed(options: SeedOptions) {
     },
   });
   console.log(`Created workspace: ${workspace.id}`);
+
+  // Create workspace settings for batch processing
+  const workspaceSettings = await prisma.workspaceSettings.upsert({
+    where: { workspaceId: workspace.id },
+    update: {
+      batchSize: options.batchSize,
+      rateLimitPerSecond: options.rateLimitPerSecond,
+    },
+    create: {
+      workspaceId: workspace.id,
+      instanceName: 'Load Test Instance',
+      timezone: 'UTC',
+      batchSize: options.batchSize,
+      rateLimitPerSecond: options.rateLimitPerSecond,
+      collisionWindow: 86400,
+      queryTimeout: 30,
+    },
+  });
+  console.log(`Created workspace settings: batchSize=${workspaceSettings.batchSize}, rateLimit=${workspaceSettings.rateLimitPerSecond}/sec`);
 
   // Create email connector (SMTP pointing to mailpit)
   const smtpConfig = encryptConfig({
@@ -359,6 +386,9 @@ async function seed(options: SeedOptions) {
   console.log('\nLoad test data seeding complete!');
   console.log('\nTest entities created:');
   console.log(`  - Workspace: ${workspace.id}`);
+  console.log(`  - Workspace Settings:`);
+  console.log(`      - batchSize: ${workspaceSettings.batchSize}`);
+  console.log(`      - rateLimitPerSecond: ${workspaceSettings.rateLimitPerSecond}`);
   console.log(`  - Email Connector: ${emailConnector.id}`);
   console.log(`  - Sender Profile: ${senderProfile.id}`);
   console.log(`  - Template: ${template.id}`);

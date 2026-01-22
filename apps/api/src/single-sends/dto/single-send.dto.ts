@@ -30,6 +30,10 @@ export class CreateSingleSendDto {
   @IsNotEmpty()
   senderProfileId!: string;
 
+  @IsString()
+  @IsOptional()
+  campaignGroupId?: string;
+
   @IsEnum(ScheduleType)
   @IsOptional()
   scheduleType?: ScheduleType;
@@ -67,6 +71,10 @@ export class UpdateSingleSendDto {
   @IsString()
   @IsOptional()
   senderProfileId?: string;
+
+  @IsString()
+  @IsOptional()
+  campaignGroupId?: string | null;
 
   @IsEnum(ScheduleType)
   @IsOptional()

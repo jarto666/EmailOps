@@ -37,6 +37,7 @@ EmailOps is a **SQL-first email orchestration platform** with these key differen
 **File**: `apps/api/prisma/schema.prisma`
 
 - [x] `Workspace` — Tenant container
+- [x] `WorkspaceSettings` — Batch size, rate limits, collision window, query timeout
 - [x] `DataConnector` — Postgres/BigQuery connections
 - [x] `EmailProviderConnector` — SES/Resend/SMTP providers
 - [x] `SenderProfile` — From addresses
@@ -199,6 +200,13 @@ EmailOps is a **SQL-first email orchestration platform** with these key differen
 - [x] `GET /analytics/campaigns/:id` — Campaign-specific stats
 - [x] `GET /analytics/skip-reasons` — Skip reason breakdown
 
+### 2.12 Settings
+
+**File**: `apps/api/src/settings/`
+
+- [x] `GET /settings` — Get workspace settings
+- [x] `PATCH /settings` — Update workspace settings (batch size, rate limits, collision window, query timeout)
+
 ---
 
 ## Phase 3: Web UI ✅ COMPLETE
@@ -315,22 +323,23 @@ EmailOps is a **SQL-first email orchestration platform** with these key differen
 - [x] Apply collision filters (batch check)
 - [x] Check suppressions
 - [x] Create SingleSendRecipient records
-- [x] Enqueue send jobs (paged)
+- [x] Create batch jobs based on WorkspaceSettings.batchSize
 - [x] Handle deduplication against previous runs
 
 ### 4.3 Send Processor
 
 **File**: `apps/api/src/processors/send.processor.ts`
 
+- [x] Handle `sendEmailBatch` job type (batch processing)
 - [x] Render template with variables (HTML, MJML, UI Builder)
 - [x] Send via email connector (SES)
 - [x] Send-time collision check (belt-and-suspenders)
 - [x] Update Send record status
 - [x] Record in SendLog for collision tracking
-- [x] Rate limiting (Redis-backed leaky bucket)
+- [x] Rate limiting (Redis-backed, configurable via settings)
 - [x] Handle retries with exponential backoff
 - [x] Idempotency via Send record
-- [x] Auto-complete run when all recipients processed
+- [x] Auto-complete run when all batches processed
 
 ### 4.4 Events Processor
 
@@ -348,13 +357,14 @@ EmailOps is a **SQL-first email orchestration platform** with these key differen
 
 ### 5.1 Campaign Execution Flow
 
-- [x] Trigger campaign → create run → build audience → send emails
+- [x] Trigger campaign → create run → build audience → batch jobs → send emails
+- [x] Batch processing with configurable batch size (WorkspaceSettings)
 - [x] Collision detection at audience build time
 - [x] Collision detection at send time (belt-and-suspenders)
-- [x] Rate limiting per sender profile (Redis-backed)
+- [x] Rate limiting per workspace (Redis-backed, configurable via settings)
 - [x] Retry logic with exponential backoff
 - [x] Idempotency guarantees
-- [x] Auto-complete runs when all recipients processed
+- [x] Auto-complete runs when all batches processed
 
 ### 5.2 Template Rendering
 
@@ -388,6 +398,7 @@ EmailOps is a **SQL-first email orchestration platform** with these key differen
 - [x] Test fixtures factory
 - [x] Integration tests for templates API
 - [x] Integration tests for single-sends API
+- [x] Load tests with k6 (smoke, concurrent, throughput, collision, batch)
 - [ ] Unit tests for collision service
 - [ ] Unit tests for rendering service
 - [ ] E2E tests with Playwright
@@ -428,6 +439,7 @@ email-ops/
 │   │   │   ├── processors/           ✅ BullMQ job processors
 │   │   │   ├── segments/             ✅ SQL-based audiences
 │   │   │   ├── sender-profiles/      ✅ From addresses
+│   │   │   ├── settings/             ✅ Workspace settings (batch, rate limits)
 │   │   │   ├── single-sends/         ✅ Campaign orchestration
 │   │   │   ├── suppression/          ✅ Bounce/complaint handling
 │   │   │   ├── templates/            ✅ Template management
@@ -1010,6 +1022,9 @@ Use open-source lists (updated periodically):
 - [x] Complete campaign execution flow
 - [x] Email delivery working end-to-end (SES)
 - [x] Webhook event processing (SES)
+- [x] Workspace settings (batch size, rate limits, collision window)
+- [x] Batch processing for efficient high-volume sends
+- [x] Load testing suite (k6)
 - [ ] Visual template editor with preview
 - [ ] One-click unsubscribe in emails
 - [ ] CSV segment upload support

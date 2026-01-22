@@ -49,6 +49,7 @@ Performance and stress tests using k6. Requires separate infrastructure (Docker 
 - **Concurrent triggers** - Multiple campaigns triggered simultaneously (deadlock detection)
 - **Queue throughput** - Sustained request rate with latency percentiles
 - **Collision accuracy** - Verify zero duplicate sends under concurrent load
+- **Batch processing** - Verify batch processing with configurable settings (batch size, rate limits)
 
 See `apps/api/test/load/README.md` for detailed setup and usage.
 
@@ -127,6 +128,7 @@ pnpm test:load:smoke              # Quick health check
 pnpm test:load:concurrent         # Concurrent triggers
 pnpm test:load:throughput         # Throughput test
 pnpm test:load:collision          # Collision accuracy
+pnpm test:load:batch              # Batch processing test
 
 # 5. Cleanup
 pnpm test:load:infra:down

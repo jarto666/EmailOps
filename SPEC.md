@@ -29,6 +29,17 @@ It provides:
 
 A logical tenant boundary. Currently single-tenant only (one workspace per deployment).
 
+### Workspace Settings
+
+Per-workspace configuration controlling batch processing and system behavior:
+
+| Setting | Range | Default | Description |
+|---------|-------|---------|-------------|
+| `batchSize` | 10-1000 | 100 | Recipients per batch job |
+| `rateLimitPerSecond` | 1-500 | 50 | Max emails sent per second |
+| `collisionWindow` | 1hr-7days | 24hr | Default collision detection window |
+| `queryTimeout` | 5-300s | 30s | SQL query timeout |
+
 ### Connectors
 
 Runtime integrations for external systems:
@@ -177,9 +188,19 @@ WHERE u.credits < 20
 1. **Trigger**: Campaign triggered manually or by schedule
 2. **Build Audience**: Execute segment SQL, store recipients
 3. **Apply Filters**: Check suppressions and collision rules
-4. **Queue Sends**: Create send jobs for eligible recipients
-5. **Process Sends**: Deliver emails with rate limiting and retries
-6. **Finalize**: Update run stats and status
+4. **Create Batches**: Group recipients into batches (size from settings)
+5. **Queue Batch Jobs**: Enqueue batch jobs for parallel processing
+6. **Process Batches**: Each batch delivers emails with rate limiting
+7. **Finalize**: Auto-complete run when all batches finish
+
+### Batch Processing
+
+Recipients are grouped into batches based on `WorkspaceSettings.batchSize`:
+- Default batch size: 100 recipients
+- Example: 1,000 recipients → 10 batch jobs
+- Each batch job processes sequentially with rate limiting
+- Multiple batches can process in parallel (configurable concurrency)
+- Run auto-completes when all batches report completion
 
 ---
 
@@ -263,7 +284,7 @@ No collision handling. All campaigns send independently (opt-out of collision de
 
 - Dry-run: Automatic LIMIT injection
 - Full-run: Configurable row limit (default: 1M)
-- Statement timeout: 5s (dry-run), 300s (full-run)
+- Statement timeout: Configurable via settings (5-300s, default: 30s)
 - Read-only transaction mode
 
 ### Credential Security

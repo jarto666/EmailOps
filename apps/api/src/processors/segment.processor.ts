@@ -8,6 +8,7 @@ import { CollisionPolicy, RecipientStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { CollisionService } from "./services/collision.service";
 import { SuppressionService } from "../suppression/suppression.service";
+import { SettingsService } from "../settings/settings.service";
 
 @Processor("segment")
 export class SegmentProcessor extends WorkerHost {
@@ -17,6 +18,7 @@ export class SegmentProcessor extends WorkerHost {
     private prisma: PrismaService,
     private collisionService: CollisionService,
     private suppressionService: SuppressionService,
+    private settingsService: SettingsService,
     @InjectQueue("send") private sendQueue: Queue
   ) {
     super();
@@ -142,14 +144,14 @@ export class SegmentProcessor extends WorkerHost {
       console.log(`Found ${alreadySentSubjectIds.size} recipients already sent for campaign ${singleSendId}`);
 
       // Process rows and build recipients list
-      const batchSize = 500;
+      const insertBatchSize = 500;
       let inserted = 0;
       let skippedDedup = 0;
       let skippedCollision = 0;
       let skippedSuppression = 0;
 
-      for (let i = 0; i < rows.length; i += batchSize) {
-        const batch = rows.slice(i, i + batchSize);
+      for (let i = 0; i < rows.length; i += insertBatchSize) {
+        const batch = rows.slice(i, i + insertBatchSize);
 
         // Parse recipients from batch
         const parsedRecipients = batch
@@ -286,15 +288,23 @@ export class SegmentProcessor extends WorkerHost {
         },
       });
 
-      // Enqueue sends for all pending recipients (paged).
+      // Enqueue sends for all pending recipients in batches
       await this.prisma.singleSendRun.update({
         where: { id: runId },
         data: { status: SingleSendRunStatus.SENDING },
       });
 
-      const pageSize = 500;
+      // Get batch settings from workspace settings
+      const batchSettings = await this.settingsService.getBatchSettings(workspaceId);
+      const batchSize = batchSettings.batchSize;
+      const rateLimitPerSecond = batchSettings.rateLimitPerSecond;
+      console.log(`Using batch settings: batchSize=${batchSize}, rateLimitPerSecond=${rateLimitPerSecond}`);
+
+      const pageSize = 1000; // Larger page for efficiency, we'll batch them
       let cursor: string | undefined = undefined;
       let enqueued = 0;
+      let batchIndex = 0;
+      let recipientIdsBatch: string[] = [];
 
       for (;;) {
         const page: Array<{ id: string }> =
@@ -308,22 +318,55 @@ export class SegmentProcessor extends WorkerHost {
         if (page.length === 0) break;
 
         for (const rr of page) {
-          await this.sendQueue.add(
-            "sendEmail",
-            { singleSendRecipientId: rr.id },
-            {
-              jobId: `send-${rr.id}`,
-              attempts: 5,
-              backoff: { type: "exponential", delay: 5_000 },
-              removeOnComplete: true,
-              removeOnFail: 100,
-            }
-          );
-          enqueued += 1;
+          recipientIdsBatch.push(rr.id);
+
+          // When we reach batchSize, enqueue the batch job
+          if (recipientIdsBatch.length >= batchSize) {
+            await this.sendQueue.add(
+              "sendEmailBatch",
+              {
+                runId,
+                recipientIds: recipientIdsBatch,
+                rateLimitPerSecond,
+              },
+              {
+                jobId: `send-batch-${runId}-${batchIndex}`,
+                attempts: 3,
+                backoff: { type: "exponential", delay: 10_000 },
+                removeOnComplete: true,
+                removeOnFail: 100,
+              }
+            );
+            enqueued += recipientIdsBatch.length;
+            batchIndex++;
+            recipientIdsBatch = [];
+          }
         }
 
         cursor = page[page.length - 1]?.id;
       }
+
+      // Enqueue any remaining recipients
+      if (recipientIdsBatch.length > 0) {
+        await this.sendQueue.add(
+          "sendEmailBatch",
+          {
+            runId,
+            recipientIds: recipientIdsBatch,
+            rateLimitPerSecond,
+          },
+          {
+            jobId: `send-batch-${runId}-${batchIndex}`,
+            attempts: 3,
+            backoff: { type: "exponential", delay: 10_000 },
+            removeOnComplete: true,
+            removeOnFail: 100,
+          }
+        );
+        enqueued += recipientIdsBatch.length;
+      }
+
+      console.log(`Enqueued ${enqueued} recipients in ${batchIndex + (recipientIdsBatch.length > 0 ? 1 : 0)} batches`);
 
       // If no recipients were enqueued (all were already sent/skipped), mark run as completed
       if (enqueued === 0) {

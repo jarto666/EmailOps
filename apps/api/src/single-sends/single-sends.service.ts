@@ -79,6 +79,7 @@ export class SingleSendsService {
     templateId: string;
     segmentId: string;
     senderProfileId: string;
+    campaignGroupId?: string;
     scheduleType?: ScheduleType;
     cronExpression?: string;
     policies?: Record<string, any>;
@@ -96,7 +97,7 @@ export class SingleSendsService {
       create: { id: input.workspaceId, name: "Default Workspace" },
     });
 
-    const [template, segment, senderProfile] = await Promise.all([
+    const [template, segment, senderProfile, campaignGroup] = await Promise.all([
       this.prisma.template.findFirst({
         where: { id: input.templateId, workspaceId: input.workspaceId },
         select: { id: true },
@@ -109,11 +110,19 @@ export class SingleSendsService {
         where: { id: input.senderProfileId, workspaceId: input.workspaceId },
         select: { id: true },
       }),
+      input.campaignGroupId
+        ? this.prisma.campaignGroup.findFirst({
+            where: { id: input.campaignGroupId, workspaceId: input.workspaceId },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
     ]);
     if (!template) throw new BadRequestException("templateId is invalid for workspace.");
     if (!segment) throw new BadRequestException("segmentId is invalid for workspace.");
     if (!senderProfile)
       throw new BadRequestException("senderProfileId is invalid for workspace.");
+    if (input.campaignGroupId && !campaignGroup)
+      throw new BadRequestException("campaignGroupId is invalid for workspace.");
 
     const scheduleType = input.scheduleType ?? ScheduleType.MANUAL;
     validateCron(input.cronExpression, scheduleType);
@@ -127,6 +136,7 @@ export class SingleSendsService {
         templateId: input.templateId,
         segmentId: input.segmentId,
         senderProfileId: input.senderProfileId,
+        campaignGroupId: input.campaignGroupId ?? undefined,
         scheduleType,
         cronExpression: scheduleType === ScheduleType.CRON ? input.cronExpression : undefined,
         policies: input.policies ?? undefined,
@@ -191,6 +201,13 @@ export class SingleSendsService {
       });
       if (!ok) throw new BadRequestException("senderProfileId is invalid for workspace.");
     }
+    if (input.campaignGroupId) {
+      const ok = await this.prisma.campaignGroup.findFirst({
+        where: { id: input.campaignGroupId, workspaceId },
+        select: { id: true },
+      });
+      if (!ok) throw new BadRequestException("campaignGroupId is invalid for workspace.");
+    }
 
     const scheduleType = input.scheduleType != null ? input.scheduleType : undefined;
     const cronExpression = input.cronExpression != null ? input.cronExpression : undefined;
@@ -205,6 +222,7 @@ export class SingleSendsService {
         templateId: input.templateId ?? undefined,
         segmentId: input.segmentId ?? undefined,
         senderProfileId: input.senderProfileId ?? undefined,
+        campaignGroupId: input.campaignGroupId === null ? null : (input.campaignGroupId ?? undefined),
         scheduleType: scheduleType ?? undefined,
         cronExpression: cronExpression ?? undefined,
         policies: input.policies ?? undefined,

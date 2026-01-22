@@ -18,19 +18,8 @@ import {
   Table,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import type { Segment, DataConnector } from "@/lib/api";
+import type { Segment, DataConnector, DryRunResult } from "@/lib/api";
 import { useToast } from "@/components/toast";
-
-type DryRunResult = {
-  count: number;
-  rows: Record<string, unknown>[];
-  validation: {
-    valid: boolean;
-    errors: string[];
-    warnings: string[];
-    foundColumns: { id?: string; email?: string; vars?: string };
-  };
-};
 
 export default function SegmentEditor({
   segmentId,
@@ -331,11 +320,14 @@ export default function SegmentEditor({
                   disabled={isSaving}
                 />
                 <p className="text-xs text-muted-foreground mt-2">
-                  Must return an ID column (<code className="text-cyan-400">subject_id</code>, <code className="text-cyan-400">recipient_id</code>, or <code className="text-cyan-400">id</code>),{" "}
+                  Must return an ID column (
+                  <code className="text-cyan-400">subject_id</code>,{" "}
+                  <code className="text-cyan-400">recipient_id</code>, or{" "}
+                  <code className="text-cyan-400">id</code>),{" "}
                   <code className="text-cyan-400">email</code>, and optionally{" "}
-                  <code className="text-cyan-400">vars</code> (JSON for template variables). Only
-                  SELECT/WITH queries allowed. Preview runs with LIMIT and 5s
-                  timeout.
+                  <code className="text-cyan-400">vars</code> (JSON for template
+                  variables). Only SELECT/WITH queries allowed. Preview runs
+                  with LIMIT and 5s timeout.
                 </p>
               </div>
             </div>
@@ -385,7 +377,9 @@ export default function SegmentEditor({
                         <X className="w-4 h-4 text-rose-400 mt-0.5 flex-shrink-0" />
                         <div className="space-y-1">
                           {preview.validation.errors.map((err, i) => (
-                            <p key={i} className="text-xs text-rose-400">{err}</p>
+                            <p key={i} className="text-xs text-rose-400">
+                              {err}
+                            </p>
                           ))}
                         </div>
                       </div>
@@ -397,27 +391,43 @@ export default function SegmentEditor({
                         <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
                         <div className="space-y-1">
                           {preview.validation.warnings.map((warn, i) => (
-                            <p key={i} className="text-xs text-amber-400">{warn}</p>
+                            <p key={i} className="text-xs text-amber-400">
+                              {warn}
+                            </p>
                           ))}
                         </div>
                       </div>
                     </div>
                   )}
-                  {preview.validation.valid && preview.validation.warnings.length === 0 && (
-                    <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                      <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded-full bg-emerald-400 flex items-center justify-center">
-                          <svg className="w-2.5 h-2.5 text-background" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
+                  {preview.validation.valid &&
+                    preview.validation.warnings.length === 0 && (
+                      <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded-full bg-emerald-400 flex items-center justify-center">
+                            <svg
+                              className="w-2.5 h-2.5 text-background"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={3}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M5 13l4 4L19 7"
+                              />
+                            </svg>
+                          </div>
+                          <p className="text-xs text-emerald-400">
+                            Valid schema: {preview.validation.foundColumns.id}{" "}
+                            (ID), {preview.validation.foundColumns.email}{" "}
+                            (email)
+                            {preview.validation.foundColumns.vars &&
+                              `, ${preview.validation.foundColumns.vars} (vars)`}
+                          </p>
                         </div>
-                        <p className="text-xs text-emerald-400">
-                          Valid schema: {preview.validation.foundColumns.id} (ID), {preview.validation.foundColumns.email} (email)
-                          {preview.validation.foundColumns.vars && `, ${preview.validation.foundColumns.vars} (vars)`}
-                        </p>
                       </div>
-                    </div>
-                  )}
+                    )}
                 </div>
               )}
 
@@ -439,22 +449,20 @@ export default function SegmentEditor({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border-default">
-                        {preview.rows
-                          .slice(0, previewLimit)
-                          .map((row, idx) => (
-                            <tr key={idx} className="hover:bg-background/50">
-                              {columns.map((c) => (
-                                <td
-                                  key={c}
-                                  className="px-3 py-2 font-mono text-foreground"
-                                >
-                                  {typeof row?.[c] === "object"
-                                    ? JSON.stringify(row?.[c])
-                                    : String(row?.[c] ?? "")}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
+                        {preview.rows.slice(0, previewLimit).map((row, idx) => (
+                          <tr key={idx} className="hover:bg-background/50">
+                            {columns.map((c) => (
+                              <td
+                                key={c}
+                                className="px-3 py-2 font-mono text-foreground"
+                              >
+                                {typeof row?.[c] === "object"
+                                  ? JSON.stringify(row?.[c])
+                                  : String(row?.[c] ?? "")}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
@@ -490,16 +498,23 @@ export default function SegmentEditor({
                 </p>
                 <ul className="text-xs text-muted-foreground mt-2 space-y-2">
                   <li>
-                    <code className="text-cyan-400">subject_id</code> or <code className="text-cyan-400">recipient_id</code> or <code className="text-cyan-400">id</code>
-                    <span className="block text-faint">Unique user identifier</span>
+                    <code className="text-cyan-400">subject_id</code> or{" "}
+                    <code className="text-cyan-400">recipient_id</code> or{" "}
+                    <code className="text-cyan-400">id</code>
+                    <span className="block text-faint">
+                      Unique user identifier
+                    </span>
                   </li>
                   <li>
                     <code className="text-cyan-400">email</code>
                     <span className="block text-faint">Email address</span>
                   </li>
                   <li>
-                    <code className="text-cyan-400">vars</code> <span className="text-faint">(optional)</span>
-                    <span className="block text-faint">Template variables as JSON object</span>
+                    <code className="text-cyan-400">vars</code>{" "}
+                    <span className="text-faint">(optional)</span>
+                    <span className="block text-faint">
+                      Template variables as JSON object
+                    </span>
                   </li>
                 </ul>
               </div>

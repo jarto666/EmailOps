@@ -239,6 +239,17 @@ export interface Segment {
   };
 }
 
+export interface DryRunResult {
+  count: number;
+  rows: Record<string, unknown>[];
+  validation: {
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+    foundColumns: { id?: string; email?: string; vars?: string };
+  };
+}
+
 export interface CreateSegmentDto {
   workspaceId: string;
   name: string;
@@ -260,7 +271,7 @@ export const segments = {
   delete: (id: string) =>
     request<void>(`/segments/${id}`, { method: "DELETE" }),
   dryRun: (id: string, limit = 10) =>
-    request<{ count: number; sample: unknown[] }>(`/segments/${id}/dry-run`, {
+    request<DryRunResult>(`/segments/${id}/dry-run`, {
       method: "POST",
       body: { limit },
     }),
@@ -679,6 +690,38 @@ export const demo = {
 };
 
 // =============================================================================
+// SETTINGS
+// =============================================================================
+
+export interface WorkspaceSettings {
+  id: string;
+  workspaceId: string;
+  instanceName: string;
+  timezone: string;
+  batchSize: number;
+  rateLimitPerSecond: number;
+  collisionWindow: number;
+  queryTimeout: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateSettingsDto {
+  instanceName?: string;
+  timezone?: string;
+  batchSize?: number;
+  rateLimitPerSecond?: number;
+  collisionWindow?: number;
+  queryTimeout?: number;
+}
+
+export const settings = {
+  get: () => request<WorkspaceSettings>("/settings"),
+  update: (data: UpdateSettingsDto) =>
+    request<WorkspaceSettings>("/settings", { method: "PATCH", body: data }),
+};
+
+// =============================================================================
 // API OBJECT EXPORT
 // =============================================================================
 
@@ -694,6 +737,7 @@ export const api = {
   senderProfiles,
   suppressions,
   demo,
+  settings,
 };
 
 export default api;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Settings,
   Bell,
@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Info,
+  AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -25,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { settings as settingsApi, WorkspaceSettings } from '@/lib/api';
 
 function SettingsSection({
   title,
@@ -78,17 +80,72 @@ function Toggle({ defaultChecked = false }: { defaultChecked?: boolean }) {
 }
 
 export default function SettingsPage() {
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSave = () => {
-    setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
+  // Form state
+  const [instanceName, setInstanceName] = useState('EmailOps');
+  const [timezone, setTimezone] = useState('UTC');
+  const [batchSize, setBatchSize] = useState(100);
+  const [rateLimitPerSecond, setRateLimitPerSecond] = useState(50);
+  const [collisionWindow, setCollisionWindow] = useState(86400);
+  const [queryTimeout, setQueryTimeout] = useState(30);
+
+  // Load settings on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await settingsApi.get();
+        setInstanceName(data.instanceName);
+        setTimezone(data.timezone);
+        setBatchSize(data.batchSize);
+        setRateLimitPerSecond(data.rateLimitPerSecond);
+        setCollisionWindow(data.collisionWindow);
+        setQueryTimeout(data.queryTimeout);
+      } catch (e: any) {
+        setError(e.message || 'Failed to load settings');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadSettings();
+  }, []);
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      await settingsApi.update({
+        instanceName,
+        timezone,
+        batchSize,
+        rateLimitPerSecond,
+        collisionWindow,
+        queryTimeout,
+      });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    }, 1000);
+    } catch (e: any) {
+      setError(e.message || 'Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="animate-slide-up">
+        <div className="flex items-center justify-center h-64">
+          <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="animate-slide-up">
@@ -114,6 +171,13 @@ export default function SettingsPage() {
         </Button>
       </div>
 
+      {error && (
+        <div className="mb-6 p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-destructive" />
+          <span className="text-sm text-destructive">{error}</span>
+        </div>
+      )}
+
       <div className="space-y-6">
         {/* General Settings */}
         <SettingsSection
@@ -126,13 +190,14 @@ export default function SettingsPage() {
               <Label>Instance Name</Label>
               <Input
                 type="text"
-                defaultValue="EmailOps"
+                value={instanceName}
+                onChange={(e) => setInstanceName(e.target.value)}
                 placeholder="Your instance name"
               />
             </div>
             <div className="space-y-2">
               <Label>Default Timezone</Label>
-              <Select defaultValue="UTC">
+              <Select value={timezone} onValueChange={setTimezone}>
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -201,31 +266,33 @@ export default function SettingsPage() {
                 <Label>Default Batch Size</Label>
                 <Input
                   type="number"
-                  defaultValue={100}
+                  value={batchSize}
+                  onChange={(e) => setBatchSize(parseInt(e.target.value) || 100)}
                   min={10}
                   max={1000}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Recipients per batch
+                  Recipients per batch (10-1000)
                 </p>
               </div>
               <div className="space-y-2">
                 <Label>Rate Limit (per second)</Label>
                 <Input
                   type="number"
-                  defaultValue={50}
+                  value={rateLimitPerSecond}
+                  onChange={(e) => setRateLimitPerSecond(parseInt(e.target.value) || 50)}
                   min={1}
-                  max={100}
+                  max={500}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Max emails per second
+                  Max emails per second (1-500)
                 </p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Default Collision Window</Label>
-                <Select defaultValue="86400">
+                <Select value={String(collisionWindow)} onValueChange={(v) => setCollisionWindow(parseInt(v))}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -242,7 +309,8 @@ export default function SettingsPage() {
                 <Label>Query Timeout (seconds)</Label>
                 <Input
                   type="number"
-                  defaultValue={30}
+                  value={queryTimeout}
+                  onChange={(e) => setQueryTimeout(parseInt(e.target.value) || 30)}
                   min={5}
                   max={300}
                 />

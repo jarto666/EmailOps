@@ -46,6 +46,8 @@ export class SendProcessor extends WorkerHost {
     switch (job.name) {
       case "sendEmail":
         return this.sendEmail(job);
+      case "sendEmailBatch":
+        return this.sendEmailBatch(job);
       case "sendJourneyEmail":
         return this.sendJourneyEmail(job);
       default:
@@ -373,6 +375,266 @@ export class SendProcessor extends WorkerHost {
       }
 
       throw e;
+    }
+  }
+
+  /**
+   * Process a batch of emails with rate limiting.
+   * This is more efficient than individual jobs as it:
+   * - Reduces job queue overhead
+   * - Can reuse connections within a batch
+   * - Applies rate limiting consistently across the batch
+   */
+  private async sendEmailBatch(job: Job<any, any, string>) {
+    const { runId, recipientIds, rateLimitPerSecond } = job.data as {
+      runId: string;
+      recipientIds: string[];
+      rateLimitPerSecond: number;
+    };
+
+    console.log(`sendEmailBatch started: runId=${runId}, recipients=${recipientIds.length}, rateLimit=${rateLimitPerSecond}/s`);
+
+    if (!runId || !recipientIds || recipientIds.length === 0) {
+      throw new BadRequestException("runId and recipientIds are required");
+    }
+
+    // Get run info once for the entire batch
+    const run = await this.prisma.singleSendRun.findFirst({
+      where: { id: runId },
+      include: {
+        singleSend: {
+          include: {
+            template: true,
+            senderProfile: { include: { emailProviderConnector: true } },
+            campaignGroup: true,
+          },
+        },
+      },
+    });
+
+    if (!run) throw new BadRequestException("SingleSendRun not found");
+    const singleSend = run.singleSend;
+    if (!singleSend) throw new BadRequestException("SingleSend not found");
+
+    const senderProfile = singleSend.senderProfile;
+    if (!senderProfile) throw new BadRequestException("SenderProfile missing");
+    const connector = senderProfile.emailProviderConnector;
+    if (!connector) throw new BadRequestException("SenderProfile connector missing");
+
+    // Load template version once
+    const version = await this.prisma.templateVersion.findFirst({
+      where: { templateId: singleSend.templateId, active: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!version) {
+      throw new BadRequestException(
+        "No active template version. Publish a template version first."
+      );
+    }
+
+    const from = senderProfile.fromName
+      ? `${senderProfile.fromName} <${senderProfile.fromEmail}>`
+      : senderProfile.fromEmail;
+
+    // Decrypt connector config once
+    const decryptedConfig = this.decryptConnectorConfig(connector.config);
+
+    // Process results tracking
+    let sent = 0;
+    let failed = 0;
+    let skipped = 0;
+
+    // Process each recipient in the batch with rate limiting
+    for (const recipientId of recipientIds) {
+      try {
+        const result = await this.processSingleRecipientInBatch(
+          recipientId,
+          singleSend,
+          version,
+          from,
+          connector,
+          decryptedConfig,
+          rateLimitPerSecond
+        );
+
+        if (result.sent) sent++;
+        else if (result.skipped) skipped++;
+        else if (result.failed) failed++;
+      } catch (e: any) {
+        console.error(`Error processing recipient ${recipientId}: ${e?.message}`);
+        failed++;
+      }
+    }
+
+    console.log(`sendEmailBatch completed: sent=${sent}, failed=${failed}, skipped=${skipped}`);
+
+    // Check if run should be completed after processing this batch
+    await this.checkAndCompleteRun(runId);
+
+    return { ok: true, sent, failed, skipped };
+  }
+
+  /**
+   * Process a single recipient within a batch context.
+   * Reuses the pre-loaded template, connector config, etc.
+   */
+  private async processSingleRecipientInBatch(
+    recipientId: string,
+    singleSend: any,
+    version: any,
+    from: string,
+    connector: any,
+    decryptedConfig: Record<string, any>,
+    rateLimitPerSecond: number
+  ): Promise<{ sent?: boolean; skipped?: boolean; failed?: boolean }> {
+    const rr = await this.prisma.singleSendRecipient.findFirst({
+      where: { id: recipientId },
+      select: {
+        id: true,
+        runId: true,
+        subjectId: true,
+        email: true,
+        vars: true,
+        status: true,
+      },
+    });
+
+    if (!rr) {
+      console.log(`Recipient ${recipientId} not found, skipping`);
+      return { skipped: true };
+    }
+
+    // Skip if already processed
+    if (rr.status !== RecipientStatus.PENDING) {
+      return { skipped: true };
+    }
+
+    // Send-time collision check
+    const campaignGroup = singleSend.campaignGroup;
+    if (singleSend.campaignGroupId && campaignGroup) {
+      const collisionResult = await this.collisionService.checkCollisionAtSendTime(
+        singleSend.workspaceId,
+        rr.subjectId,
+        singleSend.campaignGroupId,
+        campaignGroup.collisionWindow
+      );
+
+      if (collisionResult.blocked) {
+        await this.prisma.singleSendRecipient.update({
+          where: { id: rr.id },
+          data: {
+            status: RecipientStatus.SKIPPED,
+            skipReason: collisionResult.reason,
+          },
+        });
+        return { skipped: true };
+      }
+    }
+
+    // Idempotency / Send record
+    const idempotencyKey = `singleSendRecipient:${recipientId}`;
+    const send = await this.prisma.send.upsert({
+      where: { idempotencyKey },
+      create: {
+        singleSendRecipientId: recipientId,
+        idempotencyKey,
+        status: SendStatus.QUEUED,
+        attempts: 1,
+      },
+      update: {
+        attempts: { increment: 1 },
+      },
+    });
+
+    // If already sent, short-circuit
+    if (send.status === SendStatus.SENT) {
+      return { skipped: true };
+    }
+
+    // Apply rate limiting
+    await this.applyRateLimit(singleSend.senderProfileId, rateLimitPerSecond);
+
+    // Compile template with recipient variables
+    const variables = (rr.vars && typeof rr.vars === "object" ? rr.vars : {}) as Record<string, any>;
+    const compiled = this.compileAndRender(version, variables);
+
+    try {
+      let messageId: string | undefined;
+
+      if (connector.type === EmailProviderType.SES) {
+        const sesCfg = this.normalizeSesConfig(decryptedConfig);
+        const ses = new SesService(sesCfg.region, {
+          accessKeyId: sesCfg.accessKeyId,
+          secretAccessKey: sesCfg.secretAccessKey,
+        });
+
+        const resp: any = await ses.sendEmail({
+          from,
+          to: [rr.email],
+          subject: compiled.subject,
+          html: compiled.html,
+        });
+        messageId = resp?.MessageId ?? resp?.messageId;
+      } else if (connector.type === EmailProviderType.SMTP) {
+        const smtpCfg = this.normalizeSmtpConfig(decryptedConfig);
+        const smtp = new SmtpService(smtpCfg);
+
+        const resp = await smtp.sendEmail({
+          from,
+          to: [rr.email],
+          subject: compiled.subject,
+          html: compiled.html,
+        });
+        messageId = resp.messageId;
+      } else {
+        throw new BadRequestException(
+          `Sending not implemented for connector type: ${connector.type}`
+        );
+      }
+
+      await this.prisma.$transaction([
+        this.prisma.send.update({
+          where: { id: send.id },
+          data: {
+            status: SendStatus.SENT,
+            providerMessageId: messageId,
+          },
+        }),
+        this.prisma.singleSendRecipient.update({
+          where: { id: rr.id },
+          data: { status: RecipientStatus.SENT, skipReason: null },
+        }),
+      ]);
+
+      // Record send for collision detection
+      if (singleSend.campaignGroupId) {
+        await this.collisionService.recordSend(
+          singleSend.workspaceId,
+          rr.subjectId,
+          singleSend.campaignGroupId,
+          singleSend.id
+        );
+      }
+
+      return { sent: true };
+    } catch (e: any) {
+      console.error(`Error sending to ${rr.email}: ${e?.message ?? e}`);
+
+      await this.prisma.$transaction([
+        this.prisma.send.update({
+          where: { id: send.id },
+          data: { status: SendStatus.FAILED, lastError: String(e?.message ?? e) },
+        }),
+        this.prisma.singleSendRecipient.update({
+          where: { id: rr.id },
+          data: {
+            status: RecipientStatus.FAILED,
+            skipReason: String(e?.message ?? e),
+          },
+        }),
+      ]);
+
+      return { failed: true };
     }
   }
 

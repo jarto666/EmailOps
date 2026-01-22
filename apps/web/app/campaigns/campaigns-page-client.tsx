@@ -62,6 +62,17 @@ function ScheduleBadge({ type, cron }: { type: string; cron?: string | null }) {
   );
 }
 
+const initialFormData = {
+  name: "",
+  description: "",
+  templateId: "",
+  segmentId: "",
+  senderProfileId: "",
+  campaignGroupId: "",
+  priority: 50,
+  cronExpression: "",
+};
+
 function CreateCampaignModal({
   isOpen,
   onClose,
@@ -81,18 +92,19 @@ function CreateCampaignModal({
 }) {
   const toast = useToast();
   const [scheduleType, setScheduleType] = useState<"MANUAL" | "CRON">("MANUAL");
-  const [formData, setFormData] = useState({
-    name: "",
-    description: "",
-    templateId: "",
-    segmentId: "",
-    senderProfileId: "",
-    campaignGroupId: "",
-    priority: 50,
-    cronExpression: "",
-  });
+  const [formData, setFormData] = useState(initialFormData);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Reset form when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setFormData(initialFormData);
+      setScheduleType("MANUAL");
+      setIsSubmitting(false);
+      setError(null);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -115,6 +127,7 @@ function CreateCampaignModal({
           scheduleType === "CRON" ? formData.cronExpression : undefined,
       });
       toast.success("Campaign created successfully");
+      setIsSubmitting(false);
       onCreated();
       onClose();
     } catch (err) {

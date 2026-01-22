@@ -24,7 +24,8 @@
     "test:load:smoke": "k6 run test/load/scenarios/smoke.js --env API_URL=http://localhost:3301",
     "test:load:concurrent": "k6 run test/load/scenarios/concurrent-triggers.js --env API_URL=http://localhost:3301",
     "test:load:throughput": "k6 run test/load/scenarios/queue-throughput.js --env API_URL=http://localhost:3301",
-    "test:load:collision": "k6 run test/load/scenarios/collision-accuracy.js --env API_URL=http://localhost:3301"
+    "test:load:collision": "k6 run test/load/scenarios/collision-accuracy.js --env API_URL=http://localhost:3301",
+    "test:load:batch": "k6 run test/load/scenarios/batch-processing.js --env API_URL=http://localhost:3301"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.968.0",

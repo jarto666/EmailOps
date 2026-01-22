@@ -95,6 +95,30 @@ k6 run test/load/scenarios/collision-accuracy.js --env CAMPAIGNS_PER_GROUP=10
 - `duplicates_found` - Must be 0 (zero tolerance)
 - `collision_blocked` - Number of sends blocked by collision detection
 
+### Batch Processing (`batch-processing.js`)
+
+Verifies batch processing works correctly with workspace settings.
+
+```bash
+k6 run test/load/scenarios/batch-processing.js
+
+# With custom max wait time
+k6 run test/load/scenarios/batch-processing.js --env MAX_WAIT=600
+```
+
+**What it tests:**
+1. Settings API returns correct batch configuration
+2. Campaign trigger creates batch jobs
+3. All recipients are processed correctly
+4. Run completes within expected time
+
+**Metrics:**
+- `emails_sent` - Total emails sent
+- `emails_failed` - Failed sends
+- `emails_skipped` - Skipped (dedup, collision, suppression)
+- `processing_time_seconds` - Total run duration
+- `emails_per_second` - Throughput rate
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -104,6 +128,7 @@ k6 run test/load/scenarios/collision-accuracy.js --env CAMPAIGNS_PER_GROUP=10
 | `CONCURRENT` | `10` | Concurrent VUs for trigger tests |
 | `TARGET_RPS` | `100` | Target requests per second |
 | `CAMPAIGNS_PER_GROUP` | `5` | Campaigns to test per group |
+| `MAX_WAIT` | `300` | Max wait time for batch test (seconds) |
 
 ## Infrastructure
 
@@ -143,7 +168,17 @@ npx ts-node test/load/scripts/seed-data.ts \
   --recipients=100000 \
   --campaigns=50 \
   --groups=5
+
+# Custom batch settings (creates WorkspaceSettings)
+npx ts-node test/load/scripts/seed-data.ts \
+  --recipients=10000 \
+  --batchSize=200 \
+  --rateLimit=100
 ```
+
+The seed script creates `WorkspaceSettings` with configurable:
+- `batchSize` - Recipients per batch job (default: 100)
+- `rateLimitPerSecond` - Max emails per second (default: 50)
 
 ## Success Criteria
 
@@ -154,6 +189,7 @@ npx ts-node test/load/scripts/seed-data.ts \
 | Throughput 100/s | p95 < 100ms | p95 > 200ms |
 | Throughput 500/s | p95 < 100ms | p95 > 500ms |
 | Collision accuracy | 0 duplicates | Any duplicates |
+| Batch processing | Complete in < 5min | Timeout or failures |
 
 ## Cleanup
 

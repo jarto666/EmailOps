@@ -193,6 +193,11 @@ apps/api/
 │   │   ├── sender-profiles.service.ts
 │   │   └── dto/
 │   │
+│   ├── settings/               # Workspace settings
+│   │   ├── settings.controller.ts
+│   │   ├── settings.service.ts
+│   │   └── dto/
+│   │
 │   ├── single-sends/           # Campaign orchestration
 │   │   ├── single-sends.controller.ts
 │   │   ├── single-sends.service.ts
@@ -283,18 +288,30 @@ apps/api/
                           │ id              │       │ sentAt          │
                           │ type            │       └─────────────────┘
                           │ name            │
-                          │ config (enc)    │
-                          └─────────────────┘
-
-                          ┌─────────────────┐
-                          │ EmailConnector  │
-                          ├─────────────────┤
-                          │ id              │
-                          │ type            │
-                          │ name            │
-                          │ config (enc)    │
-                          └─────────────────┘
+                          │ config (enc)    │       ┌───────────────────┐
+                          └─────────────────┘       │ WorkspaceSettings │
+                                                    ├───────────────────┤
+                          ┌─────────────────┐       │ id                │
+                          │ EmailConnector  │       │ workspaceId       │
+                          ├─────────────────┤       │ instanceName      │
+                          │ id              │       │ timezone          │
+                          │ type            │       │ batchSize         │
+                          │ name            │       │ rateLimitPerSecond│
+                          │ config (enc)    │       │ collisionWindow   │
+                          └─────────────────┘       │ queryTimeout      │
+                                                    └───────────────────┘
 ```
+
+### Workspace Settings
+
+Per-workspace configuration that controls batch processing and rate limiting:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `batchSize` | 100 | Number of recipients per batch job (10-1000) |
+| `rateLimitPerSecond` | 50 | Max emails per second (1-500) |
+| `collisionWindow` | 86400 | Default collision window in seconds (1-7 days) |
+| `queryTimeout` | 30 | SQL query timeout in seconds (5-300) |
 
 ---
 
@@ -482,13 +499,15 @@ interface Variable {
 │                                                                             │
 │  queue:segment                                                              │
 │  ├── Jobs: buildAudienceSnapshot                                            │
-│  │   └── Execute SQL, apply collision filters, enqueue sends                │
+│  │   └── Execute SQL, apply filters, create BATCH jobs                      │
 │  └── Jobs: dryRunSegment                                                    │
 │      └── Preview query with LIMIT                                           │
 │                                                                             │
 │  queue:send                                                                 │
-│  └── Jobs: sendEmail                                                        │
-│      └── Rate limit, send via provider, track status                        │
+│  ├── Jobs: sendEmailBatch                                                   │
+│  │   └── Process batch of recipients with rate limiting                     │
+│  └── Jobs: sendEmail (legacy)                                               │
+│      └── Single email send (backwards compatibility)                        │
 │                                                                             │
 │  queue:events                                                               │
 │  └── Jobs: delivery, bounce, complaint                                      │
@@ -500,15 +519,47 @@ interface Variable {
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Batch Processing
+
+Recipients are grouped into batches for efficient processing:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         BATCH PROCESSING FLOW                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. Segment Processor builds audience                                       │
+│     └── Query returns N recipients                                          │
+│                                                                             │
+│  2. Recipients grouped into batches                                         │
+│     └── Batch size from WorkspaceSettings.batchSize (default: 100)          │
+│     └── Example: 1000 recipients → 10 batch jobs                            │
+│                                                                             │
+│  3. Each batch job contains:                                                │
+│     ├── recipientIds: string[]  (IDs of recipients in batch)                │
+│     ├── runId: string           (for status tracking)                       │
+│     └── singleSendId: string    (campaign reference)                        │
+│                                                                             │
+│  4. Send Processor handles batch:                                           │
+│     ├── Load recipients from database                                       │
+│     ├── Apply rate limiting (Redis-backed leaky bucket)                     │
+│     ├── Render and send each email                                          │
+│     └── Update stats atomically                                             │
+│                                                                             │
+│  5. Run auto-completes when all batches finish                              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 ### Rate Limiting
 
 ```
-Algorithm: Token Bucket (Redis-backed)
+Algorithm: Leaky Bucket (Redis-backed)
 
-Per sender profile:
-├── bucket_size: 100 (max burst)
-├── refill_rate: 10/second (sustained rate)
-└── key: rate_limit:{senderProfileId}
+Per workspace:
+├── Rate from WorkspaceSettings.rateLimitPerSecond (default: 50/sec)
+├── Enforced per batch job
+└── key: rate_limit:{workspaceId}
 
 Implementation: Lua script for atomic check-and-decrement
 ```
@@ -705,6 +756,10 @@ Suppressions
 GET    /suppressions
 POST   /suppressions
 DELETE /suppressions/:id
+
+Settings
+GET    /settings           (get workspace settings)
+PATCH  /settings           (update workspace settings)
 
 Analytics
 GET    /analytics/overview

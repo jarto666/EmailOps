@@ -33,6 +33,7 @@ email-ops/
 │   │   │   ├── processors/       # BullMQ job processors
 │   │   │   ├── segments/         # SQL-based audiences
 │   │   │   ├── sender-profiles/  # From addresses
+│   │   │   ├── settings/         # Workspace settings (batch, rate limits)
 │   │   │   ├── single-sends/     # Campaign orchestration
 │   │   │   ├── suppression/      # Bounce/complaint handling
 │   │   │   ├── templates/        # Template management & rendering
@@ -230,6 +231,7 @@ make demo-open        # Open Mailpit in browser
 | Segments | `/segments` - SQL-based audiences |
 | Campaign Groups | `/campaign-groups` - Collision management |
 | Single Sends | `/single-sends` - Campaigns |
+| Settings | `/settings` - Workspace batch/rate limit configuration |
 | Analytics | `/analytics` - Dashboard metrics |
 | Suppressions | `/suppressions` - Bounce/unsubscribe management |
 
@@ -274,6 +276,9 @@ pnpm test:integration
 - [x] Rate limiting (Redis-backed)
 - [x] Suppression management
 - [x] Demo mode with Mailpit & event simulation
+- [x] Workspace settings (batch size, rate limits, collision window)
+- [x] Batch processing (configurable batch sizes, efficient job queuing)
+- [x] Load testing suite (k6-based performance tests)
 
 ### Planned
 

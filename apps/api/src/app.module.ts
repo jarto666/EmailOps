@@ -17,6 +17,7 @@ import { AnalyticsModule } from "./analytics/analytics.module";
 import { SuppressionModule } from "./suppression/suppression.module";
 import { ProcessorsModule } from "./processors/processors.module";
 import { DemoModule } from "./demo/demo.module";
+import { SettingsModule } from "./settings/settings.module";
 import { join } from "path";
 
 @Module({
@@ -38,6 +39,7 @@ import { join } from "path";
     // Core
     HealthModule,
     PrismaModule,
+    SettingsModule,
 
     // Campaign Groups & Collision
     CampaignGroupsModule,

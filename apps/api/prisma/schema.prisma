@@ -25,6 +25,9 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Settings (one-to-one relation)
+  settings WorkspaceSettings?
+
   // Connectors
   dataConnectors          DataConnector[]
   emailProviderConnectors EmailProviderConnector[]
@@ -48,6 +51,26 @@ model Workspace {
   // journeys     Journey[]
   // subjects     Subject[]
   // events       Event[]
+}
+
+// Workspace settings (one-to-one with Workspace)
+model WorkspaceSettings {
+  id          String    @id @default(cuid())
+  workspaceId String    @unique
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // General
+  instanceName String  @default("EmailOps")
+  timezone     String  @default("UTC")
+
+  // Email Defaults
+  batchSize          Int @default(100)    // Recipients per batch (10-1000)
+  rateLimitPerSecond Int @default(50)     // Max emails per second (1-500)
+  collisionWindow    Int @default(86400)  // Default collision window in seconds (24h)
+  queryTimeout       Int @default(30)     // Query timeout in seconds (5-300)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // =============================================================================
