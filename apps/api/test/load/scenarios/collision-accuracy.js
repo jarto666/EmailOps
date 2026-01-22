@@ -2,8 +2,14 @@
  * Collision Detection Accuracy Test
  *
  * Verifies collision detection works correctly under concurrent load.
- * Multiple campaigns in the same group targeting overlapping recipients
- * should never result in duplicate sends.
+ * Multiple campaigns in the same group target partially overlapping recipients:
+ * - Segment A: first 60% of recipients
+ * - Segment B: last 60% of recipients (20% overlap with A)
+ *
+ * Expected behavior:
+ * - Some emails should be sent (non-overlapping recipients)
+ * - Some should be blocked by collision detection (overlapping recipients)
+ * - Zero duplicate sends should occur
  *
  * Usage:
  *   k6 run test/load/scenarios/collision-accuracy.js
@@ -18,6 +24,7 @@ import { url, withWorkspace, defaultHeaders, WORKSPACE_ID } from './config.js';
 // Custom metrics
 const collisionChecked = new Counter('collision_checked');
 const collisionBlocked = new Counter('collision_blocked');
+const emailsSent = new Counter('emails_sent');
 const duplicatesFound = new Counter('duplicates_found');
 const checkDuration = new Trend('collision_check_duration');
 
@@ -49,6 +56,7 @@ export const options = {
   thresholds: {
     duplicates_found: ['count==0'], // Zero tolerance for duplicates
     collision_blocked: ['count>0'], // We expect some collisions to be blocked
+    emails_sent: ['count>0'], // We expect some emails to actually be sent
   },
 };
 
@@ -193,6 +201,11 @@ export function verifyResults(data) {
         const stats = run.stats || {};
         console.log(`  Run ${run.id}: status=${run.status}, sent=${stats.sent || 0}, skipped=${stats.skipped || 0}`);
 
+        // Track emails sent
+        if (stats.sent) {
+          emailsSent.add(stats.sent);
+        }
+
         if (stats.skippedReasons) {
           console.log(`    Skip reasons: ${JSON.stringify(stats.skippedReasons)}`);
           if (stats.skippedReasons.collision) {
@@ -207,7 +220,10 @@ export function verifyResults(data) {
   // This would require a custom API endpoint or database access
 
   console.log('\nCollision verification complete');
-  console.log('Check the metrics for duplicates_found - should be 0');
+  console.log('Expected results:');
+  console.log('  - emails_sent > 0 (some emails should be delivered)');
+  console.log('  - collision_blocked > 0 (overlapping recipients should be blocked)');
+  console.log('  - duplicates_found == 0 (no duplicate sends)');
 }
 
 export function teardown(data) {

@@ -539,6 +539,29 @@ export class SendProcessor extends WorkerHost {
       return;
     }
 
+    // Count skip reasons for detailed stats
+    const skippedRecipients = await this.prisma.singleSendRecipient.findMany({
+      where: { runId, status: RecipientStatus.SKIPPED },
+      select: { skipReason: true },
+    });
+
+    const skippedReasons = {
+      collision: 0,
+      suppression: 0,
+      other: 0,
+    };
+
+    for (const r of skippedRecipients) {
+      const reason = r.skipReason ?? "";
+      if (reason.startsWith("collision:")) {
+        skippedReasons.collision++;
+      } else if (reason.startsWith("suppression:")) {
+        skippedReasons.suppression++;
+      } else {
+        skippedReasons.other++;
+      }
+    }
+
     await this.prisma.singleSendRun.update({
       where: { id: runId },
       data: {
@@ -549,6 +572,7 @@ export class SendProcessor extends WorkerHost {
           sent: sentCount,
           failed: failedCount,
           skipped: skippedCount,
+          skippedReasons,
         },
       },
     });

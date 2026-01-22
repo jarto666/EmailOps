@@ -105,7 +105,7 @@ export class SegmentProcessor extends WorkerHost {
     // Use shared adapters (read-only enforced for Postgres).
     console.log(`Decrypting connector config...`);
     const decrypted = this.decryptConnectorConfig(connector.config);
-    console.log(`Connector config decrypted, connecting to ${decrypted.host}:${decrypted.port}`);
+    console.log(`Connector config decrypted for ${connector.type} connector`);
 
     // ConnectorFactory currently supports POSTGRES | BIGQUERY.
     const adapterType =
@@ -277,9 +277,11 @@ export class SegmentProcessor extends WorkerHost {
           stats: {
             total: rows.length,
             inserted,
-            skippedDedup,
-            skippedCollision,
-            skippedSuppression,
+            skippedReasons: {
+              alreadySent: skippedDedup,
+              collision: skippedCollision,
+              suppression: skippedSuppression,
+            },
           },
         },
       });
@@ -334,12 +336,14 @@ export class SegmentProcessor extends WorkerHost {
             stats: {
               total: rows.length,
               inserted,
-              skippedDedup,
-              skippedCollision,
-              skippedSuppression,
               sent: 0,
               failed: 0,
               skipped: skippedCollision + skippedSuppression,
+              skippedReasons: {
+                alreadySent: skippedDedup,
+                collision: skippedCollision,
+                suppression: skippedSuppression,
+              },
             },
           },
         });

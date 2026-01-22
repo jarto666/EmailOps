@@ -125,11 +125,7 @@ async function seed(options: SeedOptions) {
 
   // Create data connector pointing to the load test database
   const dbConfig = encryptConfig({
-    host: 'localhost',
-    port: 5477,
-    database: 'emailops_load',
-    user: 'emailops',
-    password: 'emailops',
+    connectionString: 'postgresql://emailops:emailops@localhost:5477/emailops_load',
   });
   const dataConnector = await prisma.dataConnector.upsert({
     where: { id: 'load-test-data' },
@@ -184,7 +180,8 @@ async function seed(options: SeedOptions) {
   });
   console.log(`Created template: ${template.id}`);
 
-  // Create segment
+  // Create segments
+  // Main segment with all recipients (for backward compatibility and non-collision tests)
   const segment = await prisma.segment.upsert({
     where: { id: 'load-test-segment' },
     update: { sqlQuery: `SELECT id, email, first_name, last_name FROM load_test_recipients LIMIT ${options.recipients}` },
@@ -193,11 +190,49 @@ async function seed(options: SeedOptions) {
       workspaceId: workspace.id,
       dataConnectorId: dataConnector.id,
       name: `Load Test Segment (${options.recipients} recipients)`,
-      description: 'Segment for load testing',
+      description: 'Segment for load testing - all recipients',
       sqlQuery: `SELECT id, email, first_name, last_name FROM load_test_recipients LIMIT ${options.recipients}`,
     },
   });
   console.log(`Created segment: ${segment.id}`);
+
+  // Overlapping segments for collision testing
+  // Segment A: first 60% of recipients
+  // Segment B: last 60% of recipients (20% overlap with A)
+  const segmentALimit = Math.floor(options.recipients * 0.6);
+  const segmentBOffset = Math.floor(options.recipients * 0.4);
+  const segmentBLimit = options.recipients - segmentBOffset;
+
+  const segmentA = await prisma.segment.upsert({
+    where: { id: 'load-test-segment-a' },
+    update: { sqlQuery: `SELECT id, email, first_name, last_name FROM load_test_recipients LIMIT ${segmentALimit}` },
+    create: {
+      id: 'load-test-segment-a',
+      workspaceId: workspace.id,
+      dataConnectorId: dataConnector.id,
+      name: `Load Test Segment A (first ${segmentALimit} recipients)`,
+      description: 'Segment A for collision testing - first 60% of recipients',
+      sqlQuery: `SELECT id, email, first_name, last_name FROM load_test_recipients LIMIT ${segmentALimit}`,
+    },
+  });
+  console.log(`Created segment: ${segmentA.id} (${segmentALimit} recipients)`);
+
+  const segmentB = await prisma.segment.upsert({
+    where: { id: 'load-test-segment-b' },
+    update: { sqlQuery: `SELECT id, email, first_name, last_name FROM load_test_recipients OFFSET ${segmentBOffset} LIMIT ${segmentBLimit}` },
+    create: {
+      id: 'load-test-segment-b',
+      workspaceId: workspace.id,
+      dataConnectorId: dataConnector.id,
+      name: `Load Test Segment B (last ${segmentBLimit} recipients)`,
+      description: 'Segment B for collision testing - last 60% of recipients',
+      sqlQuery: `SELECT id, email, first_name, last_name FROM load_test_recipients OFFSET ${segmentBOffset} LIMIT ${segmentBLimit}`,
+    },
+  });
+  console.log(`Created segment: ${segmentB.id} (${segmentBLimit} recipients, offset ${segmentBOffset})`);
+
+  // Store segments for campaign assignment
+  const segments = { main: segment, a: segmentA, b: segmentB };
 
   // Create campaign groups
   const groups = [];
@@ -219,11 +254,33 @@ async function seed(options: SeedOptions) {
   }
 
   // Create campaigns
+  // Campaigns in group 0 (HIGHEST_PRIORITY_WINS) use alternating overlapping segments for collision testing
+  // Campaigns in other groups use the full segment
   for (let i = 0; i < options.campaigns; i++) {
     const groupIndex = i % options.campaignGroups;
+
+    // For group 0 (collision test group), alternate between segment A and B
+    // For other groups, use the main full segment
+    let segmentId: string;
+    let segmentLabel: string;
+    if (groupIndex === 0) {
+      // Alternate between segment A and B within group 0
+      const campaignsInGroup0 = Math.floor(i / options.campaignGroups);
+      if (campaignsInGroup0 % 2 === 0) {
+        segmentId = segments.a.id;
+        segmentLabel = 'A';
+      } else {
+        segmentId = segments.b.id;
+        segmentLabel = 'B';
+      }
+    } else {
+      segmentId = segments.main.id;
+      segmentLabel = 'main';
+    }
+
     const campaign = await prisma.singleSend.upsert({
       where: { id: `load-test-campaign-${i}` },
-      update: {},
+      update: { segmentId }, // Update segment on re-seed
       create: {
         id: `load-test-campaign-${i}`,
         workspaceId: workspace.id,
@@ -231,14 +288,14 @@ async function seed(options: SeedOptions) {
         description: `Campaign ${i} for load testing`,
         status: 'ACTIVE',
         templateId: template.id,
-        segmentId: segment.id,
+        segmentId,
         senderProfileId: senderProfile.id,
         campaignGroupId: groups[groupIndex].id,
         priority: (i % 10) + 1, // Priority 1-10
         scheduleType: 'MANUAL',
       },
     });
-    console.log(`Created campaign: ${campaign.id} (group: ${groupIndex}, priority: ${campaign.priority})`);
+    console.log(`Created campaign: ${campaign.id} (group: ${groupIndex}, segment: ${segmentLabel}, priority: ${campaign.priority})`);
   }
 
   // Create recipients table and populate with test data
@@ -277,13 +334,38 @@ async function seed(options: SeedOptions) {
     }
   }
 
+  // Clean up old test data for fresh collision testing
+  console.log('\nCleaning up old test data...');
+  const deletedSendLogs = await prisma.sendLog.deleteMany({
+    where: { workspaceId: workspace.id },
+  });
+  console.log(`  Deleted ${deletedSendLogs.count} old SendLog entries`);
+
+  const deletedSends = await prisma.send.deleteMany({
+    where: { singleSendRecipient: { run: { singleSend: { workspaceId: workspace.id } } } },
+  });
+  console.log(`  Deleted ${deletedSends.count} old Send entries`);
+
+  const deletedRecipients = await prisma.singleSendRecipient.deleteMany({
+    where: { run: { singleSend: { workspaceId: workspace.id } } },
+  });
+  console.log(`  Deleted ${deletedRecipients.count} old SingleSendRecipient entries`);
+
+  const deletedRuns = await prisma.singleSendRun.deleteMany({
+    where: { singleSend: { workspaceId: workspace.id } },
+  });
+  console.log(`  Deleted ${deletedRuns.count} old SingleSendRun entries`);
+
   console.log('\nLoad test data seeding complete!');
   console.log('\nTest entities created:');
   console.log(`  - Workspace: ${workspace.id}`);
   console.log(`  - Email Connector: ${emailConnector.id}`);
   console.log(`  - Sender Profile: ${senderProfile.id}`);
   console.log(`  - Template: ${template.id}`);
-  console.log(`  - Segment: ${segment.id}`);
+  console.log(`  - Segments:`);
+  console.log(`      - ${segments.main.id} (all ${options.recipients} recipients)`);
+  console.log(`      - ${segments.a.id} (first ${segmentALimit} recipients)`);
+  console.log(`      - ${segments.b.id} (last ${segmentBLimit} recipients, 20% overlap with A)`);
   console.log(`  - Campaign Groups: ${groups.length}`);
   console.log(`  - Campaigns: ${options.campaigns}`);
   console.log(`  - Recipients: ${options.recipients}`);
