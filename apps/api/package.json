@@ -15,7 +15,16 @@
     "db:generate": "dotenv -e ../../.env -- prisma generate",
     "db:push": "dotenv -e ../../.env -- prisma db push",
     "db:migrate": "dotenv -e ../../.env -- prisma migrate dev",
-    "db:seed": "dotenv -e ../../.env -- prisma db seed"
+    "db:seed": "dotenv -e ../../.env -- prisma db seed",
+    "test:load:infra": "docker-compose -f test/load/docker-compose.yml up -d",
+    "test:load:infra:down": "docker-compose -f test/load/docker-compose.yml down",
+    "test:load:db:push": "DATABASE_URL=postgresql://emailops:emailops@localhost:5477/emailops_load prisma db push",
+    "test:load:seed": "DATABASE_URL=postgresql://emailops:emailops@localhost:5477/emailops_load ENCRYPTION_SECRET=load-test-secret-key-32chars!! npx ts-node test/load/scripts/seed-data.ts",
+    "test:load:api": "DATABASE_URL=postgresql://emailops:emailops@localhost:5477/emailops_load REDIS_HOST=localhost REDIS_PORT=6380 PORT=3301 ENCRYPTION_SECRET=load-test-secret-key-32chars!! nest start",
+    "test:load:smoke": "k6 run test/load/scenarios/smoke.js --env API_URL=http://localhost:3301",
+    "test:load:concurrent": "k6 run test/load/scenarios/concurrent-triggers.js --env API_URL=http://localhost:3301",
+    "test:load:throughput": "k6 run test/load/scenarios/queue-throughput.js --env API_URL=http://localhost:3301",
+    "test:load:collision": "k6 run test/load/scenarios/collision-accuracy.js --env API_URL=http://localhost:3301"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.968.0",
@@ -50,6 +59,7 @@
     "@types/pg": "^8.16.0",
     "dotenv": "^17.2.3",
     "prisma": "^7.2.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
   "prisma": {

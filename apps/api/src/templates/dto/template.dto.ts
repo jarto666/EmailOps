@@ -2,10 +2,6 @@ import { TemplateCategory } from "@prisma/client";
 import { IsEnum, IsNotEmpty, IsOptional, IsString } from "class-validator";
 
 export class CreateTemplateDto {
-  @IsString()
-  @IsNotEmpty()
-  workspaceId!: string;
-
   // e.g. "welcome-email"
   @IsString()
   @IsNotEmpty()
@@ -16,7 +12,8 @@ export class CreateTemplateDto {
   name!: string;
 
   @IsEnum(TemplateCategory)
-  category!: TemplateCategory;
+  @IsOptional()
+  category?: TemplateCategory;
 }
 
 export class UpdateTemplateDto {

@@ -10,32 +10,31 @@ import { PrismaService } from "../prisma/prisma.service";
 export class TemplatesService {
   constructor(private prisma: PrismaService) {}
 
-  async create(input: {
-    workspaceId: string;
+  async create(workspaceId: string, input: {
     key: string;
     name: string;
-    category: TemplateCategory;
+    category?: TemplateCategory;
   }) {
     try {
-      if (!input.workspaceId || input.workspaceId.trim().length === 0) {
+      if (!workspaceId || workspaceId.trim().length === 0) {
         throw new BadRequestException("workspaceId is required.");
       }
 
       // Ensure workspace exists so Template.workspaceId FK doesn't fail.
       // This keeps the API usable early on before we have full Workspaces CRUD/UI.
       await this.prisma.workspace.upsert({
-        where: { id: input.workspaceId },
+        where: { id: workspaceId },
         update: {},
-        create: { id: input.workspaceId, name: "Default Workspace" },
+        create: { id: workspaceId, name: "Default Workspace" },
       });
 
       // Create template with initial version in a transaction
       const template = await this.prisma.template.create({
         data: {
-          workspaceId: input.workspaceId,
+          workspaceId,
           key: input.key,
           name: input.name,
-          category: input.category,
+          category: input.category ?? TemplateCategory.TRANSACTIONAL,
           versions: {
             create: {
               version: 1,

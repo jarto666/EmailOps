@@ -1,0 +1,9 @@
+export { CampaignsResource } from './campaigns';
+export { TemplatesResource } from './templates';
+export { SegmentsResource } from './segments';
+export { SenderProfilesResource } from './senderProfiles';
+export { CampaignGroupsResource } from './campaignGroups';
+export { DataConnectorsResource } from './dataConnectors';
+export { EmailConnectorsResource } from './emailConnectors';
+export { SuppressionsResource } from './suppressions';
+export { AnalyticsResource } from './analytics';

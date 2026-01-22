@@ -1,0 +1,74 @@
+version: "3.8"
+
+# Load testing infrastructure
+# Usage: docker-compose -f test/load/docker-compose.yml up -d
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: emailops
+      POSTGRES_PASSWORD: emailops
+      POSTGRES_DB: emailops_load
+    ports:
+      - "5477:5432"
+    volumes:
+      - postgres_load_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U emailops -d emailops_load"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Mock SMTP server - captures all emails without sending
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8026:8025"  # Web UI
+      - "1026:1025"  # SMTP
+    environment:
+      MP_MAX_MESSAGES: 50000
+      MP_DATABASE: /data/mailpit.db
+    volumes:
+      - mailpit_data:/data
+
+  # Grafana for metrics visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    profiles:
+      - monitoring
+
+  # InfluxDB for k6 metrics (optional)
+  influxdb:
+    image: influxdb:1.8
+    ports:
+      - "8087:8086"
+    environment:
+      INFLUXDB_DB: k6
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_load_data:
+  mailpit_data:
+  grafana_data:
+  influxdb_data:

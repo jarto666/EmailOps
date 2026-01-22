@@ -87,6 +87,13 @@ export class EmailConnectorsService {
     name: string;
     config: Record<string, any>;
   }) {
+    // Ensure workspace exists
+    await this.prisma.workspace.upsert({
+      where: { id: input.workspaceId },
+      update: {},
+      create: { id: input.workspaceId, name: 'Default Workspace' },
+    });
+
     // Generate webhook token for providers that support webhooks
     const webhookToken = WEBHOOK_PROVIDERS.includes(input.type)
       ? this.generateWebhookToken()

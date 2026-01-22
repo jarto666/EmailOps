@@ -12,6 +12,13 @@ export class SenderProfilesService {
     fromName?: string;
     replyTo?: string;
   }) {
+    // Ensure workspace exists
+    await this.prisma.workspace.upsert({
+      where: { id: input.workspaceId },
+      update: {},
+      create: { id: input.workspaceId, name: 'Default Workspace' },
+    });
+
     const connector = await this.prisma.emailProviderConnector.findFirst({
       where: {
         id: input.emailProviderConnectorId,

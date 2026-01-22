@@ -8,6 +8,13 @@ export class CampaignGroupsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(workspaceId: string, dto: CreateCampaignGroupDto) {
+    // Ensure workspace exists
+    await this.prisma.workspace.upsert({
+      where: { id: workspaceId },
+      update: {},
+      create: { id: workspaceId, name: 'Default Workspace' },
+    });
+
     // Check for duplicate name
     const existing = await this.prisma.campaignGroup.findUnique({
       where: {

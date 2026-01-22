@@ -9,8 +9,8 @@ export class TemplatesController {
   constructor(private readonly templates: TemplatesService) {}
 
   @Post()
-  create(@Body() dto: CreateTemplateDto) {
-    return this.templates.create(dto);
+  create(@Query("workspaceId") workspaceId: string, @Body() dto: CreateTemplateDto) {
+    return this.templates.create(workspaceId, dto);
   }
 
   @Get()

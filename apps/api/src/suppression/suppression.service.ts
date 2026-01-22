@@ -11,6 +11,13 @@ export class SuppressionService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(workspaceId: string, dto: CreateSuppressionDto) {
+    // Ensure workspace exists
+    await this.prisma.workspace.upsert({
+      where: { id: workspaceId },
+      update: {},
+      create: { id: workspaceId, name: 'Default Workspace' },
+    });
+
     const normalizedEmail = dto.email.toLowerCase();
 
     // Check if already exists

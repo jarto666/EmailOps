@@ -31,14 +31,19 @@ export class SegmentProcessor extends WorkerHost {
 
   async process(job: Job<any, any, string>): Promise<any> {
     console.log(`Processing segment job ${job.name}`);
-    switch (job.name) {
-      case "dryRunSegment":
-        // Execute Query with LIMIT, return count + sample
-        return { count: 0, sample: [] };
-      case "buildAudienceSnapshot":
-        return this.buildAudienceSnapshot(job.data?.runId);
-      default:
-        throw new Error(`Unknown job ${job.name}`);
+    try {
+      switch (job.name) {
+        case "dryRunSegment":
+          // Execute Query with LIMIT, return count + sample
+          return { count: 0, sample: [] };
+        case "buildAudienceSnapshot":
+          return await this.buildAudienceSnapshot(job.data?.runId);
+        default:
+          throw new Error(`Unknown job ${job.name}`);
+      }
+    } catch (error) {
+      console.error(`Segment job ${job.name} failed:`, error);
+      throw error;
     }
   }
 
@@ -60,6 +65,7 @@ export class SegmentProcessor extends WorkerHost {
   }
 
   private async buildAudienceSnapshot(runId: string) {
+    console.log(`buildAudienceSnapshot starting for runId: ${runId}`);
     if (!runId) throw new BadRequestException("runId is required");
 
     const run = await this.prisma.singleSendRun.findFirst({
@@ -94,9 +100,12 @@ export class SegmentProcessor extends WorkerHost {
       where: { id: runId },
       data: { status: SingleSendRunStatus.AUDIENCE_BUILDING },
     });
+    console.log(`Run ${runId} status updated to AUDIENCE_BUILDING`);
 
     // Use shared adapters (read-only enforced for Postgres).
+    console.log(`Decrypting connector config...`);
     const decrypted = this.decryptConnectorConfig(connector.config);
+    console.log(`Connector config decrypted, connecting to ${decrypted.host}:${decrypted.port}`);
 
     // ConnectorFactory currently supports POSTGRES | BIGQUERY.
     const adapterType =

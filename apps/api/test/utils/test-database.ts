@@ -26,7 +26,7 @@ export class TestDatabase {
     const connectionString = this.container.getConnectionUri();
 
     // Run Prisma migrations
-    const schemaPath = path.resolve(__dirname, '../../../../packages/core/prisma/schema.prisma');
+    const schemaPath = path.resolve(__dirname, '../../prisma/schema.prisma');
     execSync(`npx prisma db push --schema=${schemaPath} --url="${connectionString}"`, {
       env: {
         ...process.env,

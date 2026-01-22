@@ -1,0 +1,46 @@
+{
+  "name": "@emailops/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for EmailOps API",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "generate": "ts-node scripts/generate.ts",
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@testcontainers/postgresql": "^10.18.0",
+    "@types/node": "^22.15.21",
+    "openapi-typescript": "^7.6.1",
+    "testcontainers": "^10.18.0",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.1.4"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.0.0"
+  },
+  "keywords": [
+    "emailops",
+    "email",
+    "sdk",
+    "api",
+    "typescript"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/email-ops"
+  }
+}

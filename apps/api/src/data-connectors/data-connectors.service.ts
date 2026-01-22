@@ -58,6 +58,13 @@ export class DataConnectorsService {
     name: string;
     config: Record<string, any>;
   }) {
+    // Ensure workspace exists
+    await this.prisma.workspace.upsert({
+      where: { id: input.workspaceId },
+      update: {},
+      create: { id: input.workspaceId, name: 'Default Workspace' },
+    });
+
     const created = await this.prisma.dataConnector.create({
       data: {
         workspaceId: input.workspaceId,
