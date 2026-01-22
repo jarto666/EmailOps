@@ -1,4 +1,4 @@
-.PHONY: install dev build lint format test test-unit test-integration db-generate db-push up down logs clean help demo-up demo-down demo-logs demo-dev demo-open demo-seed demo-reset
+.PHONY: install dev build lint format test test-unit test-integration db-generate db-push up down logs clean help demo-up demo-down demo-logs demo-dev demo-open demo-seed demo-reset load-up load-down load-seed load-api load-smoke load-concurrent load-throughput load-collision load-batch load-all
 
 # -- Dependency Management --
 install:
@@ -93,6 +93,88 @@ demo-reset:
 	sleep 3
 	$(MAKE) demo-seed
 
+# -- Load Testing --
+# Uses separate infrastructure (ports 5477, 6380, 8026)
+# Requires k6: https://k6.io/docs/get-started/installation/
+#
+# Quick start:
+#   Terminal 1: make load-up && make load-seed
+#   Terminal 2: make load-api
+#   Terminal 1: make load-smoke && make load-all
+#
+# Custom seed example:
+#   cd apps/api && npx ts-node test/load/scripts/seed-data.ts \
+#     --recipients=50000 --campaigns=20 --batchSize=200 --rateLimit=100
+
+load-up:
+	cd apps/api && pnpm test:load:infra
+	@echo ""
+	@echo "Load test infrastructure started!"
+	@echo "  - PostgreSQL:  localhost:5477"
+	@echo "  - Redis:       localhost:6380"
+	@echo "  - Mailpit UI:  http://localhost:8026"
+	@echo ""
+	@echo "Next steps:"
+	@echo "  1. make load-seed       # Push schema and seed test data"
+	@echo "  2. make load-api        # Start API server (in another terminal)"
+	@echo "  3. make load-smoke      # Run smoke test"
+
+load-down:
+	cd apps/api && pnpm test:load:infra:down
+
+# Seed with default settings (1000 recipients, batchSize=100, rateLimit=50)
+# Custom: cd apps/api && npx ts-node test/load/scripts/seed-data.ts \
+#           --recipients=10000 --campaigns=20 --groups=5 --batchSize=200 --rateLimit=100
+load-seed:
+	@echo "Pushing schema and seeding load test data..."
+	cd apps/api && pnpm test:load:db:push
+	cd apps/api && pnpm test:load:seed
+
+load-api:
+	@echo "Starting API for load testing..."
+	@echo "  API: http://localhost:3301"
+	@echo ""
+	cd apps/api && pnpm test:load:api
+
+# Quick health check - verifies API is responding
+# No parameters
+load-smoke:
+	cd apps/api && pnpm test:load:smoke
+
+# Test concurrent campaign triggers (deadlock detection)
+# Params: CONCURRENT (default: 10) - number of simultaneous triggers
+# Example: k6 run test/load/scenarios/concurrent-triggers.js --env CONCURRENT=50
+load-concurrent:
+	cd apps/api && pnpm test:load:concurrent
+
+# Test sustained API throughput with latency percentiles
+# Params: TARGET_RPS (default: 100) - target requests per second
+# Example: k6 run test/load/scenarios/queue-throughput.js --env TARGET_RPS=500
+load-throughput:
+	cd apps/api && pnpm test:load:throughput
+
+# Verify collision detection accuracy under load (zero duplicates allowed)
+# Params: CAMPAIGNS_PER_GROUP (default: 5) - campaigns to test per group
+# Example: k6 run test/load/scenarios/collision-accuracy.js --env CAMPAIGNS_PER_GROUP=10
+load-collision:
+	cd apps/api && pnpm test:load:collision
+
+# Test batch processing with workspace settings
+# Params: MAX_WAIT (default: 300) - max seconds to wait for completion
+# Example: k6 run test/load/scenarios/batch-processing.js --env MAX_WAIT=600
+load-batch:
+	cd apps/api && pnpm test:load:batch
+
+load-all:
+	@echo "Running all load tests..."
+	cd apps/api && pnpm test:load:smoke
+	cd apps/api && pnpm test:load:concurrent
+	cd apps/api && pnpm test:load:throughput
+	cd apps/api && pnpm test:load:collision
+	cd apps/api && pnpm test:load:batch
+	@echo ""
+	@echo "All load tests completed!"
+
 # -- Maintenance --
 clean:
 	rm -rf dist
@@ -134,6 +216,21 @@ help:
 	@echo "    make demo-dev         - Start app in demo mode"
 	@echo "    make demo-open        - Open Mailpit UI in browser"
 	@echo "    make demo-reset       - Reset demo (destroy + recreate + seed)"
+	@echo ""
+	@echo "  Load Testing (requires k6):"
+	@echo "    make load-up          - Start load test infra (Postgres, Redis, Mailpit)"
+	@echo "    make load-down        - Stop load test infrastructure"
+	@echo "    make load-seed        - Push schema and seed test data"
+	@echo "    make load-api         - Start API server for load tests (port 3301)"
+	@echo "    make load-smoke       - Quick API health check"
+	@echo "    make load-concurrent  - Concurrent triggers (--env CONCURRENT=50)"
+	@echo "    make load-throughput  - Throughput test (--env TARGET_RPS=500)"
+	@echo "    make load-collision   - Collision accuracy (--env CAMPAIGNS_PER_GROUP=10)"
+	@echo "    make load-batch       - Batch processing (--env MAX_WAIT=600)"
+	@echo "    make load-all         - Run all load tests sequentially"
+	@echo ""
+	@echo "    Custom seed: cd apps/api && npx ts-node test/load/scripts/seed-data.ts \\"
+	@echo "                   --recipients=50000 --batchSize=200 --rateLimit=100"
 	@echo ""
 	@echo "  Maintenance:"
 	@echo "    make clean            - Deep clean (remove node_modules, dist, .next)"
