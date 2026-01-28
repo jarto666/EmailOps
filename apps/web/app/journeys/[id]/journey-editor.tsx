@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { apiFetch } from "../../lib/api";
+import { apiFetch } from "../../../lib/api";
 
 type Journey = {
   id: string;

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { apiFetch } from "../../lib/api";
+import { apiFetch } from "../../../lib/api";
 
 type SingleSendStatus = "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED" | "COMPLETED";
 type ScheduleType = "MANUAL" | "CRON";

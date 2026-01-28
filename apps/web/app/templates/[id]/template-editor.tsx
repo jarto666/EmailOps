@@ -15,7 +15,7 @@ import {
   Blocks,
   X,
 } from "lucide-react";
-import { apiFetch } from "../../lib/api";
+import { apiFetch } from "../../../lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";

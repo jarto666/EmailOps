@@ -46,6 +46,47 @@ async function request<T>(
   return response.json();
 }
 
+// Generic fetch function for custom API calls (used by editors)
+type ApiFetchOptions = {
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  query?: Record<string, string | number | undefined>;
+  body?: string; // JSON string
+};
+
+export async function apiFetch<T>(
+  endpoint: string,
+  options: ApiFetchOptions = {},
+): Promise<T> {
+  const { method = "GET", query = {}, body } = options;
+
+  const queryParams = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined) {
+      queryParams.set(key, String(value));
+    }
+  });
+
+  const queryString = queryParams.toString();
+  const url = `${API_URL}${endpoint}${queryString ? `?${queryString}` : ""}`;
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: body ?? undefined,
+  });
+
+  if (!response.ok) {
+    const error = await response
+      .json()
+      .catch(() => ({ message: "Request failed" }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
 // =============================================================================
 // ANALYTICS
 // =============================================================================
